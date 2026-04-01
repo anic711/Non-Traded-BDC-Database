@@ -66,7 +66,7 @@ async def run_update(trigger_type: str = "manual") -> int:
                 total_processed += processed
                 logger.info(f"Processed {processed} new filings for {fund.ticker}")
             except Exception as e:
-                error_msg = f"{fund.ticker}: {type(e).__name__}: {e}"
+                error_msg = f"{fund.ticker}: {type(e).__name__}: {str(e)[:200]}"
                 logger.error(error_msg)
                 errors.append(error_msg)
 
@@ -74,7 +74,7 @@ async def run_update(trigger_type: str = "manual") -> int:
         async with async_session_factory() as session:
             log = await session.get(UpdateLog, log_id)
             log.completed_at = datetime.now(timezone.utc)
-            log.status = "completed" if not errors else "completed_with_errors"
+            log.status = "completed" if not errors else "partial"
             log.filings_processed = total_processed
             log.errors = "\n".join(errors) if errors else None
             await session.commit()
