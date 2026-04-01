@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bdc_user
+      POSTGRES_PASSWORD: bdc_password
+      POSTGRES_DB: bdc_metrics
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bdc_user -d bdc_metrics"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://bdc_user:bdc_password@db:5432/bdc_metrics
+      DATABASE_URL_SYNC: postgresql+psycopg2://bdc_user:bdc_password@db:5432/bdc_metrics
+
+volumes:
+  pgdata:
