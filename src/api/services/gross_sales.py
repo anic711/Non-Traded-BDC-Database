@@ -136,13 +136,25 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
 
     dates = sorted(d for d in all_data_dates if start <= d <= end)
 
-    # Compute sub-banks
+    # Compute total sales across all funds for total-level derived metrics
+    total_sales = {}
+    for d in dates:
+        s = sum(monthly_sales.get(t, {}).get(d, 0) or 0 for t in tickers)
+        if s > 0:
+            total_sales[d] = s
+
+    # Compute sub-banks (fund-level)
     yoy_data = {t: compute_yoy_growth(monthly_sales.get(t, {})) for t in tickers}
+    total_yoy = compute_yoy_growth(total_sales)
 
     # For 3M trailing, we need the original monthly data even in quarterly mode
     if period == "quarterly":
         monthly_raw = _compute_monthly_deltas(fund_cumulative, fund_ticker_to_id, nav_by_fund)
         trailing_data = {t: compute_trailing_3m_yoy(monthly_raw.get(t, {})) for t in tickers}
+        total_trailing = compute_trailing_3m_yoy(
+            {d: sum(monthly_raw.get(t, {}).get(d, 0) or 0 for t in tickers)
+             for d in sorted(set().union(*(monthly_raw.get(t, {}).keys() for t in tickers)))}
+        )
         # Map to quarter-end dates
         for t in tickers:
             quarterly_trailing = {}
@@ -150,18 +162,31 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
                 if d in dates:
                     quarterly_trailing[d] = v
             trailing_data[t] = quarterly_trailing
+        total_trailing = {d: v for d, v in total_trailing.items() if d in dates}
     else:
         trailing_data = {t: compute_trailing_3m_yoy(monthly_sales.get(t, {})) for t in tickers}
+        total_trailing = compute_trailing_3m_yoy(total_sales)
 
     pct_nav_data = {}
+    total_nav_all = {}
     for t in tickers:
         pct_nav_data[t] = pct_of(monthly_sales.get(t, {}), nav_by_ticker.get(t, {}))
+    # Total % of NAV = total sales / total NAV across all funds
+    for d in dates:
+        nav_sum = sum(_closest_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers)
+        if nav_sum > 0 and d in total_sales:
+            total_nav_all[d] = total_sales[d] / nav_sum
+
+    def _total_from_dict(lookup):
+        def fn(d, fund_vals):
+            return lookup.get(d)
+        return fn
 
     banks = [
         build_bank("Total Gross Sales", "currency", monthly_sales, tickers, dates),
-        build_bank("Y/Y Growth", "percent", yoy_data, tickers, dates),
-        build_bank("Y/Y Growth - 3M Trailing", "percent", trailing_data, tickers, dates),
-        build_bank("% of NAV", "percent", pct_nav_data, tickers, dates),
+        build_bank("Y/Y Growth", "percent", yoy_data, tickers, dates, total_fn=_total_from_dict(total_yoy)),
+        build_bank("Y/Y Growth - 3M Trailing", "percent", trailing_data, tickers, dates, total_fn=_total_from_dict(total_trailing)),
+        build_bank("% of NAV", "percent", pct_nav_data, tickers, dates, total_fn=_total_from_dict(total_nav_all)),
     ]
 
     return {"funds": tickers, "banks": banks}
