@@ -137,7 +137,7 @@ async def get_performance_data(start: date, end: date, period: str = "monthly") 
         return num / denom if denom > 0 else None
 
     banks = [
-        build_bank("Monthly Performance", "percent", monthly_perf, tickers, dates, total_fn=weighted_avg),
+        build_bank("Performance", "percent", monthly_perf, tickers, dates, total_fn=weighted_avg),
     ]
 
     return {"funds": tickers, "banks": banks}
