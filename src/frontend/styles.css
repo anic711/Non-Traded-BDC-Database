@@ -90,6 +90,19 @@ header h1 {
 .period-btn:last-child { border-radius: 0 4px 4px 0; border-left: none; }
 .period-btn.active { background: #4a6cf7; color: white; border-color: #4a6cf7; }
 
+.refresh-btn {
+    padding: 5px 12px;
+    border: 1px solid #3a3a5a;
+    background: #2a2a4a;
+    color: #8892a0;
+    cursor: pointer;
+    font-size: 12px;
+    border-radius: 4px;
+    transition: all 0.15s;
+}
+.refresh-btn:hover { background: #4a6cf7; color: white; border-color: #4a6cf7; }
+.refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 main { padding: 0 24px 24px; }
 
 .loading {

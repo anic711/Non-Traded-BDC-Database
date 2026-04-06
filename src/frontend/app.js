@@ -59,7 +59,35 @@ function init() {
         fetchData();
     });
 
+    // Refresh button
+    document.getElementById('refresh-btn').addEventListener('click', refreshData);
+
     fetchData();
+}
+
+// --- Data Refresh ---
+
+async function refreshData() {
+    const btn = document.getElementById('refresh-btn');
+    btn.disabled = true;
+    btn.textContent = 'Refreshing...';
+    try {
+        const resp = await fetch('/api/update/trigger', { method: 'POST' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const result = await resp.json();
+        btn.textContent = 'Done!';
+        setTimeout(() => {
+            btn.textContent = 'Refresh Data';
+            btn.disabled = false;
+            fetchData();
+        }, 2000);
+    } catch (err) {
+        btn.textContent = 'Error';
+        setTimeout(() => {
+            btn.textContent = 'Refresh Data';
+            btn.disabled = false;
+        }, 3000);
+    }
 }
 
 // --- Data Fetching ---
@@ -194,7 +222,7 @@ function formatNumber(val) {
 }
 
 function formatPercent(val) {
-    return (val * 100).toFixed(1) + '%';
+    return (val * 100).toFixed(0) + '%';
 }
 
 function formatDateLabel(dateStr) {

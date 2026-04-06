@@ -19,6 +19,48 @@ def _is_rounded(value: float) -> bool:
     return value % 100_000_000 == 0
 
 
+def _compute_monthly_deltas(fund_cumulative, fund_ticker_to_id, nav_by_fund):
+    """Compute monthly sales from cumulative data, with interpolation for gaps."""
+    monthly_sales = {}
+    for ticker, data_points in fund_cumulative.items():
+        data_points.sort()
+        sales = {}
+        fid = fund_ticker_to_id[ticker]
+        for i in range(1, len(data_points)):
+            d, cum, shares = data_points[i]
+            d_prev, cum_prev, shares_prev = data_points[i - 1]
+            delta_consideration = cum - cum_prev
+            if delta_consideration < 0:
+                continue
+
+            sale_amount = None
+            if _is_rounded(cum) and _is_rounded(cum_prev):
+                delta_shares = shares - shares_prev
+                if delta_shares > 0:
+                    prior_nav = _closest_value(nav_by_fund.get(fid, {}), d_prev)
+                    if prior_nav:
+                        sale_amount = delta_shares * prior_nav
+            if sale_amount is None and delta_consideration >= 0:
+                sale_amount = delta_consideration
+
+            if sale_amount is None:
+                continue
+
+            # If data points span multiple months, split evenly
+            months_gap = (d.year - d_prev.year) * 12 + (d.month - d_prev.month)
+            if months_gap > 1:
+                per_month = sale_amount / months_gap
+                for m in range(1, months_gap + 1):
+                    mo = d_prev.month + m
+                    yr = d_prev.year + (mo - 1) // 12
+                    mo = (mo - 1) % 12 + 1
+                    sales[date(yr, mo, 1)] = per_month
+            else:
+                sales[d] = sale_amount
+        monthly_sales[ticker] = sales
+    return monthly_sales
+
+
 async def get_gross_sales_data(start: date, end: date, period: str = "monthly") -> dict:
     """Compute gross sales grid data for all funds.
 
@@ -69,33 +111,7 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
                 date.fromisoformat(str(dt)), float(cum), float(shares)
             ))
 
-    # Compute monthly deltas per fund
-    monthly_sales = {}  # {ticker: {date: value}}
-    for ticker, data_points in fund_cumulative.items():
-        data_points.sort()
-        sales = {}
-        fid = fund_ticker_to_id[ticker]
-        for i in range(1, len(data_points)):
-            d, cum, shares = data_points[i]
-            _, cum_prev, shares_prev = data_points[i - 1]
-            delta_consideration = cum - cum_prev
-            if delta_consideration < 0:  # negative deltas are data artifacts
-                continue
-
-            # If consideration is rounded, use share-based estimate
-            if _is_rounded(cum) and _is_rounded(cum_prev):
-                delta_shares = shares - shares_prev
-                if delta_shares > 0:
-                    # NAV(t-1): find avg NAV closest to the prior data point date
-                    _, d_prev, _ = data_points[i - 1][0], data_points[i - 1][0], None
-                    prior_nav = _closest_value(nav_by_fund.get(fid, {}), d_prev)
-                    if prior_nav:
-                        sales[d] = delta_shares * prior_nav
-                        continue
-            # Fall back to consideration delta
-            if delta_consideration >= 0:
-                sales[d] = delta_consideration
-        monthly_sales[ticker] = sales
+    monthly_sales = _compute_monthly_deltas(fund_cumulative, fund_ticker_to_id, nav_by_fund)
 
     # Get total NAV for % of NAV
     nav_lookup = await get_total_nav_lookup()
@@ -125,29 +141,7 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
 
     # For 3M trailing, we need the original monthly data even in quarterly mode
     if period == "quarterly":
-        # Recompute from monthly for trailing
-        monthly_raw = {}
-        for ticker, data_points in fund_cumulative.items():
-            data_points.sort()
-            sales = {}
-            fid = fund_ticker_to_id[ticker]
-            for i in range(1, len(data_points)):
-                d, cum, shares = data_points[i]
-                _, cum_prev, shares_prev = data_points[i - 1]
-                delta_consideration = cum - cum_prev
-                if delta_consideration < 0:
-                    continue
-                if _is_rounded(cum) and _is_rounded(cum_prev):
-                    delta_shares = shares - shares_prev
-                    if delta_shares > 0:
-                        d_prev = data_points[i - 1][0]
-                        prior_nav = _closest_value(nav_by_fund.get(fid, {}), d_prev)
-                        if prior_nav:
-                            sales[d] = delta_shares * prior_nav
-                            continue
-                if delta_consideration >= 0:
-                    sales[d] = delta_consideration
-            monthly_raw[ticker] = sales
+        monthly_raw = _compute_monthly_deltas(fund_cumulative, fund_ticker_to_id, nav_by_fund)
         trailing_data = {t: compute_trailing_3m_yoy(monthly_raw.get(t, {})) for t in tickers}
         # Map to quarter-end dates
         for t in tickers:
