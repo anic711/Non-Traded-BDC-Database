@@ -5,8 +5,8 @@ from alembic import context
 
 config = context.config
 
-# Override sqlalchemy.url from environment if available
-db_url = os.environ.get("DATABASE_URL_SYNC")
+# Override sqlalchemy.url from -x flag or environment
+db_url = context.get_x_argument(as_dictionary=True).get("sqlalchemy.url") or os.environ.get("DATABASE_URL_SYNC")
 if db_url:
     config.set_main_option("sqlalchemy.url", db_url)
 
@@ -17,14 +17,15 @@ if config.config_file_name is not None:
 from src.database import Base
 from src.models import (
     Fund, Filing, NavPerShare, Distribution, SharesIssued,
-    Redemption, TotalNav, UpdateLog,
+    Redemption, TotalNav, SharesOutstanding, UpdateLog,
 )
 target_metadata = Base.metadata
 
 
 def run_migrations_offline():
     url = config.get_main_option("sqlalchemy.url")
-    context.configure(url=url, target_metadata=target_metadata, literal_binds=True)
+    context.configure(url=url, target_metadata=target_metadata, literal_binds=True,
+                      render_as_batch=True)
     with context.begin_transaction():
         context.run_migrations()
 
@@ -36,7 +37,8 @@ def run_migrations_online():
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(connection=connection, target_metadata=target_metadata,
+                          render_as_batch=True)
         with context.begin_transaction():
             context.run_migrations()
 

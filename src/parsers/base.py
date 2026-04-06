@@ -34,12 +34,19 @@ class RedemptionRecord:
     shares_redeemed: Decimal | None
     value_redeemed: Decimal | None
     source_form_type: str
+    shares_tendered: Decimal | None = None
 
 
 @dataclass
 class TotalNavRecord:
     as_of_date: date
     total_nav: Decimal | None
+
+
+@dataclass
+class SharesOutstandingRecord:
+    as_of_date: date
+    total_shares_outstanding: Decimal | None
 
 
 @dataclass
@@ -50,6 +57,7 @@ class ParsedFiling:
     shares_issued_records: list[SharesIssuedRecord] = field(default_factory=list)
     redemption_records: list[RedemptionRecord] = field(default_factory=list)
     total_nav_records: list[TotalNavRecord] = field(default_factory=list)
+    shares_outstanding_records: list[SharesOutstandingRecord] = field(default_factory=list)
 
     @property
     def has_data(self) -> bool:
@@ -59,4 +67,5 @@ class ParsedFiling:
             or self.shares_issued_records
             or self.redemption_records
             or self.total_nav_records
+            or self.shares_outstanding_records
         )

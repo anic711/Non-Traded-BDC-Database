@@ -1,0 +1,208 @@
+// Non-Traded BDC Metrics Dashboard
+
+const state = {
+    activeTab: 'gross-sales',
+    period: 'monthly',
+    start: null,
+    end: null,
+    data: null,
+};
+
+const ENDPOINTS = {
+    'gross-sales': '/api/dashboard/gross-sales',
+    'redemptions': '/api/dashboard/redemptions',
+    'performance': '/api/dashboard/performance',
+    'redemption-requests': '/api/dashboard/redemption-requests',
+};
+
+// --- Initialization ---
+
+function init() {
+    // Set default dates: last 12 months
+    const now = new Date();
+    const endMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const startDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+    const startMonth = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
+
+    document.getElementById('start-date').value = startMonth;
+    document.getElementById('end-date').value = endMonth;
+    state.start = startMonth;
+    state.end = endMonth;
+
+    // Tab listeners
+    document.querySelectorAll('.tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.activeTab = btn.dataset.tab;
+            fetchData();
+        });
+    });
+
+    // Period toggle
+    document.querySelectorAll('.period-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.period = btn.dataset.period;
+            fetchData();
+        });
+    });
+
+    // Date inputs
+    document.getElementById('start-date').addEventListener('change', e => {
+        state.start = e.target.value;
+        fetchData();
+    });
+    document.getElementById('end-date').addEventListener('change', e => {
+        state.end = e.target.value;
+        fetchData();
+    });
+
+    fetchData();
+}
+
+// --- Data Fetching ---
+
+async function fetchData() {
+    const loading = document.getElementById('loading');
+    const container = document.getElementById('grid-container');
+    loading.style.display = 'block';
+    container.innerHTML = '';
+
+    const url = new URL(ENDPOINTS[state.activeTab], window.location.origin);
+    if (state.start) url.searchParams.set('start', state.start);
+    if (state.end) url.searchParams.set('end', state.end);
+    url.searchParams.set('period', state.period);
+
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        state.data = await resp.json();
+        renderGrid();
+    } catch (err) {
+        container.innerHTML = `<div class="loading">Error: ${err.message}</div>`;
+    } finally {
+        loading.style.display = 'none';
+    }
+}
+
+// --- Rendering ---
+
+function renderGrid() {
+    const container = document.getElementById('grid-container');
+    container.innerHTML = '';
+
+    if (!state.data || !state.data.banks) return;
+
+    const { funds, banks } = state.data;
+
+    for (const bank of banks) {
+        const section = document.createElement('div');
+        section.className = 'bank';
+
+        const header = document.createElement('div');
+        header.className = 'bank-header';
+        header.textContent = bank.name;
+        section.appendChild(header);
+
+        const table = document.createElement('table');
+        table.className = 'data-table';
+
+        // Header row
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        headerRow.appendChild(th('Date'));
+        for (const fund of funds) {
+            headerRow.appendChild(th(fund));
+        }
+        headerRow.appendChild(th('Total'));
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        // Data rows
+        const tbody = document.createElement('tbody');
+        const rows = bank.rows || [];
+        // Show most recent first
+        for (let i = rows.length - 1; i >= 0; i--) {
+            const row = rows[i];
+            const tr = document.createElement('tr');
+            tr.appendChild(td(formatDateLabel(row.date), 'text'));
+            for (const fund of funds) {
+                tr.appendChild(td(row[fund], bank.format));
+            }
+            tr.appendChild(td(row.Total, bank.format));
+            tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        section.appendChild(table);
+        container.appendChild(section);
+    }
+}
+
+function th(text) {
+    const el = document.createElement('th');
+    el.textContent = text;
+    return el;
+}
+
+function td(value, format) {
+    const el = document.createElement('td');
+    if (value === null || value === undefined) {
+        el.textContent = '-';
+        el.className = 'val-na';
+        return el;
+    }
+    if (format === 'text') {
+        el.textContent = value;
+        return el;
+    }
+
+    const num = Number(value);
+    if (isNaN(num)) {
+        el.textContent = value;
+        return el;
+    }
+
+    if (format === 'currency') {
+        el.textContent = formatCurrency(num);
+    } else if (format === 'percent') {
+        el.textContent = formatPercent(num);
+        if (num > 0) el.className = 'val-positive';
+        else if (num < 0) el.className = 'val-negative';
+    } else if (format === 'number') {
+        el.textContent = formatNumber(num);
+    } else {
+        el.textContent = num.toLocaleString();
+    }
+    return el;
+}
+
+// --- Formatters ---
+
+function formatCurrency(val) {
+    if (Math.abs(val) >= 1e9) return '$' + (val / 1e9).toFixed(1) + 'B';
+    if (Math.abs(val) >= 1e6) return '$' + (val / 1e6).toFixed(1) + 'M';
+    if (Math.abs(val) >= 1e3) return '$' + (val / 1e3).toFixed(0) + 'K';
+    return '$' + val.toFixed(0);
+}
+
+function formatNumber(val) {
+    if (Math.abs(val) >= 1e6) return (val / 1e6).toFixed(1) + 'M';
+    if (Math.abs(val) >= 1e3) return (val / 1e3).toFixed(0) + 'K';
+    return val.toFixed(0);
+}
+
+function formatPercent(val) {
+    return (val * 100).toFixed(1) + '%';
+}
+
+function formatDateLabel(dateStr) {
+    // "2025-03-31" -> "Mar 2025"
+    const d = new Date(dateStr + 'T00:00:00');
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return months[d.getMonth()] + ' ' + d.getFullYear();
+}
+
+// --- Start ---
+document.addEventListener('DOMContentLoaded', init);

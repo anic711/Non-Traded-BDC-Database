@@ -21,7 +21,7 @@ def upgrade() -> None:
         sa.Column("ticker", sa.String(20), nullable=False, unique=True),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("cik", sa.String(10), nullable=False, unique=True),
-        sa.Column("active", sa.Boolean(), server_default=sa.text("true")),
+        sa.Column("active", sa.Boolean(), server_default=sa.text("1")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
 
@@ -122,7 +122,7 @@ def upgrade() -> None:
         INSERT INTO funds (ticker, name, cik) VALUES
         ('BCRED', 'Blackstone Private Credit Fund', '1803498'),
         ('OCIC', 'Blue Owl Credit Income Corp', '1812554'),
-        ('ADS', 'Apollo Debt Solutions BDC', '1782981'),
+        ('ADS', 'Apollo Debt Solutions BDC', '1837532'),
         ('HLEND', 'HPS Corporate Lending Fund', '1838126'),
         ('ASIF', 'Ares Strategic Income Fund', '1918712')
     """)

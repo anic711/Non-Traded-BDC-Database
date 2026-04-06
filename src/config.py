@@ -3,8 +3,8 @@ from pydantic import Field
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://bdc_user:bdc_password@localhost:5432/bdc_metrics"
-    database_url_sync: str = "postgresql+psycopg2://bdc_user:bdc_password@localhost:5432/bdc_metrics"
+    database_url: str = "sqlite+aiosqlite:///bdc_metrics.db"
+    database_url_sync: str = "sqlite:///bdc_metrics.db"
     edgar_user_agent: str = "CompanyName admin@example.com"
     schedule_hour_1: int = 6
     schedule_hour_2: int = 18
@@ -22,7 +22,7 @@ settings = Settings()
 FUNDS = [
     {"ticker": "BCRED", "name": "Blackstone Private Credit Fund", "cik": "1803498"},
     {"ticker": "OCIC", "name": "Blue Owl Credit Income Corp", "cik": "1812554"},
-    {"ticker": "ADS", "name": "Apollo Debt Solutions BDC", "cik": "1782981"},
+    {"ticker": "ADS", "name": "Apollo Debt Solutions BDC", "cik": "1837532"},
     {"ticker": "HLEND", "name": "HPS Corporate Lending Fund", "cik": "1838126"},
     {"ticker": "ASIF", "name": "Ares Strategic Income Fund", "cik": "1918712"},
 ]

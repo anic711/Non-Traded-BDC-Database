@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Non-Traded BDC Metrics</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <h1>Non-Traded BDC Metrics Dashboard</h1>
+        <div class="controls">
+            <div class="tabs">
+                <button class="tab active" data-tab="gross-sales">Total Gross Sales</button>
+                <button class="tab" data-tab="redemptions">Redemptions</button>
+                <button class="tab" data-tab="performance">Performance</button>
+                <button class="tab" data-tab="redemption-requests">Redemption Requests</button>
+            </div>
+            <div class="filters">
+                <label>Start: <input type="month" id="start-date"></label>
+                <label>End: <input type="month" id="end-date"></label>
+                <div class="period-toggle">
+                    <button class="period-btn active" data-period="monthly">Monthly</button>
+                    <button class="period-btn" data-period="quarterly">Quarterly</button>
+                </div>
+            </div>
+        </div>
+    </header>
+    <main>
+        <div id="loading" class="loading" style="display:none;">Loading...</div>
+        <div id="grid-container"></div>
+    </main>
+    <script src="/static/app.js"></script>
+</body>
+</html>

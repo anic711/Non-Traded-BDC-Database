@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.git/
+bdc_metrics.db
+bdc_metrics_export.xlsx
+hlend_8k.html
+ocic_filing.html
+ocic_text.txt
+*.db-journal
+*.db-wal

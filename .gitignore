@@ -8,3 +8,7 @@ build/
 venv/
 *.log
 .DS_Store
+*.db
+*.db-journal
+*.db-wal
+*.xlsx

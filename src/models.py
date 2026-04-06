@@ -13,7 +13,7 @@ class Fund(Base):
     ticker = Column(String(20), nullable=False, unique=True)
     name = Column(String(255), nullable=False)
     cik = Column(String(10), nullable=False, unique=True)
-    active = Column(Boolean, default=True)
+    active = Column(Boolean, default=True, server_default="1")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -96,6 +96,7 @@ class Redemption(Base):
     fund_id = Column(Integer, ForeignKey("funds.id"), nullable=False)
     filing_id = Column(Integer, ForeignKey("filings.id"))
     as_of_date = Column(Date, nullable=False)
+    shares_tendered = Column(Numeric(18, 4))
     shares_redeemed = Column(Numeric(18, 4))
     value_redeemed = Column(Numeric(18, 2))
     source_form_type = Column(String(20))
@@ -118,6 +119,21 @@ class TotalNav(Base):
 
     __table_args__ = (
         UniqueConstraint("fund_id", "as_of_date", name="uq_total_nav"),
+    )
+
+
+class SharesOutstanding(Base):
+    __tablename__ = "shares_outstanding"
+
+    id = Column(Integer, primary_key=True)
+    fund_id = Column(Integer, ForeignKey("funds.id"), nullable=False)
+    filing_id = Column(Integer, ForeignKey("filings.id"))
+    as_of_date = Column(Date, nullable=False)
+    total_shares_outstanding = Column(Numeric(18, 0))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("fund_id", "as_of_date", name="uq_shares_outstanding"),
     )
 
 
