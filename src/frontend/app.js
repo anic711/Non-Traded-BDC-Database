@@ -203,6 +203,11 @@ function td(value, format) {
         el.className = 'val-na';
         return el;
     }
+    if (value === 'N/A') {
+        el.textContent = 'N/A';
+        el.className = 'val-na';
+        return el;
+    }
     if (format === 'text') {
         el.textContent = value;
         return el;

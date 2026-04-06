@@ -1,5 +1,6 @@
 """Tab D: Redemption Requests computation."""
 
+import calendar
 from datetime import date
 from collections import defaultdict
 
@@ -10,6 +11,7 @@ from src.api.services.common import (
     get_fund_list, get_total_nav_lookup, get_shares_outstanding_lookup,
     generate_month_ends, generate_quarter_ends,
     aggregate_quarterly, pct_of, build_bank, _closest_value, _prior_value,
+    NA, fill_na_after_start, compute_total_with_na,
 )
 
 
@@ -56,7 +58,6 @@ async def get_redemption_requests_data(start: date, end: date, period: str = "mo
         d = date.fromisoformat(str(dt))
         # Snap to quarter-end
         qm = ((d.month - 1) // 3 + 1) * 3
-        import calendar
         qe = date(d.year, qm, calendar.monthrange(d.year, qm)[1])
 
         if tendered is not None:
@@ -77,37 +78,70 @@ async def get_redemption_requests_data(start: date, end: date, period: str = "mo
     so_lookup = await get_shares_outstanding_lookup()
     so_by_ticker = {fund_id_map[fid]: sos for fid, sos in so_lookup.items() if fid in fund_id_map}
 
+    # Collect all dates and fill N/A after each fund's series starts
     all_dates = set()
     for d in list(shares_tendered.values()) + list(value_tendered.values()):
         all_dates.update(d.keys())
+    all_dates_sorted = sorted(all_dates)
+
+    for t in tickers:
+        if t in shares_tendered:
+            shares_tendered[t] = fill_na_after_start(shares_tendered[t], all_dates_sorted)
+        if t in value_tendered:
+            value_tendered[t] = fill_na_after_start(value_tendered[t], all_dates_sorted)
+        if t in pct_fulfilled:
+            pct_fulfilled[t] = fill_na_after_start(pct_fulfilled[t], all_dates_sorted, any_value=True)
+
     dates = sorted(d for d in all_dates if start <= d <= end)
 
     shares_pct_os = {t: pct_of(shares_tendered.get(t, {}), so_by_ticker.get(t, {}), prior=True) for t in tickers}
     value_pct_nav = {t: pct_of(value_tendered.get(t, {}), nav_by_ticker.get(t, {}), prior=True) for t in tickers}
 
     # Total-level derived metrics
-    total_shares = {d: sum(shares_tendered.get(t, {}).get(d, 0) or 0 for t in tickers) for d in dates}
-    total_shares = {d: v for d, v in total_shares.items() if v > 0}
-    total_value = {d: sum(value_tendered.get(t, {}).get(d, 0) or 0 for t in tickers) for d in dates}
-    total_value = {d: v for d, v in total_value.items() if v > 0}
-    total_so = {d: sum(_prior_value(so_by_ticker.get(t, {}), d) or 0 for t in tickers) for d in dates}
-    total_shares_pct_os = {d: total_shares[d] / total_so[d] if total_so.get(d) and d in total_shares else None for d in dates}
-    total_nav_sum = {d: sum(_prior_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers) for d in dates}
-    total_value_pct_nav = {d: total_value[d] / total_nav_sum[d] if total_nav_sum.get(d) and d in total_value else None for d in dates}
+    total_shares = compute_total_with_na(shares_tendered, tickers, all_dates_sorted)
+    total_value = compute_total_with_na(value_tendered, tickers, all_dates_sorted)
+
+    total_shares_pct_os = {}
+    total_value_pct_nav = {}
+    for d in dates:
+        ts = total_shares.get(d)
+        if ts == NA:
+            total_shares_pct_os[d] = NA
+        elif ts is not None:
+            so_sum = sum(_prior_value(so_by_ticker.get(t, {}), d) or 0 for t in tickers)
+            total_shares_pct_os[d] = ts / so_sum if so_sum > 0 else None
+        else:
+            total_shares_pct_os[d] = None
+
+        tv = total_value.get(d)
+        if tv == NA:
+            total_value_pct_nav[d] = NA
+        elif tv is not None:
+            nav_sum = sum(_prior_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers)
+            total_value_pct_nav[d] = tv / nav_sum if nav_sum > 0 else None
+        else:
+            total_value_pct_nav[d] = None
 
     # Total % fulfilled = total shares redeemed / total shares tendered
     total_redeemed = {}
     for d in dates:
+        ts = total_shares.get(d)
+        if ts == NA:
+            total_redeemed[d] = NA
+            continue
         redeemed_sum = 0
         tendered_sum = 0
         for t in tickers:
             ten = shares_tendered.get(t, {}).get(d)
             ful = pct_fulfilled.get(t, {}).get(d)
+            if ten == NA or ful == NA:
+                total_redeemed[d] = NA
+                break
             if ten and ful is not None:
                 redeemed_sum += ten * ful
                 tendered_sum += ten
-        total_pct_fulfilled_val = redeemed_sum / tendered_sum if tendered_sum > 0 else None
-        total_redeemed[d] = total_pct_fulfilled_val
+        else:
+            total_redeemed[d] = redeemed_sum / tendered_sum if tendered_sum > 0 else None
 
     def _total_from(lookup):
         def fn(d, fund_vals):

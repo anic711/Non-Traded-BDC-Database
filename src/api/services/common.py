@@ -10,6 +10,56 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import async_session_factory
 
+# Sentinel: series has started but data is missing for this date.
+NA = "N/A"
+
+
+def fill_na_after_start(data: dict, all_dates: list, any_value: bool = False) -> dict:
+    """After the first data point in a series, mark missing dates as N/A.
+
+    Args:
+        data: {date: value} for a single fund/series
+        all_dates: all dates that should be present (union across funds)
+        any_value: if True, series starts at first non-None value (for returns);
+                   if False, series starts at first value > 0 (for amounts)
+    """
+    if not data:
+        return {}
+    if any_value:
+        start_dates = [d for d, v in data.items() if v is not None and v != NA]
+    else:
+        start_dates = [d for d, v in data.items() if v is not None and v != NA and v > 0]
+    if not start_dates:
+        return dict(data)
+    start = min(start_dates)
+    result = dict(data)
+    for d in all_dates:
+        if d >= start and d not in result:
+            result[d] = NA
+    return result
+
+
+def compute_total_with_na(fund_data: dict, tickers: list, dates) -> dict:
+    """Sum across funds per date; return N/A if any started fund has N/A."""
+    result = {}
+    for d in dates:
+        has_na = False
+        total = 0.0
+        has_any = False
+        for t in tickers:
+            v = fund_data.get(t, {}).get(d)
+            if v == NA:
+                has_na = True
+                break
+            if v is not None:
+                total += float(v)
+                has_any = True
+        if has_na:
+            result[d] = NA
+        elif has_any and total > 0:
+            result[d] = total
+    return result
+
 
 def month_end(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
@@ -53,14 +103,22 @@ def quarter_end_for(d: date) -> date:
 def aggregate_quarterly(monthly: dict[date, float | None]) -> dict[date, float | None]:
     """Sum monthly values into quarterly buckets, keyed by quarter-end date."""
     quarterly = defaultdict(lambda: None)
-    for d, val in monthly.items():
+    na_quarters = set()
+    for d, val in sorted(monthly.items()):
+        qe = quarter_end_for(d)
+        if val == NA:
+            na_quarters.add(qe)
+            continue
+        if qe in na_quarters:
+            continue
         if val is None:
             continue
-        qe = quarter_end_for(d)
         if quarterly[qe] is None:
             quarterly[qe] = val
         else:
             quarterly[qe] += val
+    for qe in na_quarters:
+        quarterly[qe] = NA
     return dict(quarterly)
 
 
@@ -68,6 +126,9 @@ def compute_yoy_growth(values: dict[date, float | None]) -> dict[date, float | N
     """Compute Y/Y growth. Match each date to 12 months prior (or 4 quarters)."""
     result = {}
     for d, val in values.items():
+        if val == NA:
+            result[d] = NA
+            continue
         if val is None:
             result[d] = None
             continue
@@ -82,8 +143,14 @@ def compute_yoy_growth(values: dict[date, float | None]) -> dict[date, float | N
             if candidate.year == prior.year and candidate.month == prior.month:
                 best = candidate
                 break
-        if best and values[best] is not None and values[best] != 0:
-            result[d] = (val - values[best]) / abs(values[best])
+        if best is not None:
+            prior_val = values[best]
+            if prior_val == NA:
+                result[d] = NA
+            elif prior_val is not None and prior_val != 0:
+                result[d] = (val - prior_val) / abs(prior_val)
+            else:
+                result[d] = None
         else:
             result[d] = None
     return result
@@ -99,6 +166,12 @@ def compute_trailing_3m_yoy(monthly_values: dict[date, float | None]) -> dict[da
         i = date_idx[d]
         # Sum current + prior 2 months
         window = [sorted_dates[j] for j in range(max(0, i - 2), i + 1)]
+
+        # If any value in window is N/A, result is N/A
+        if any(monthly_values[w] == NA for w in window):
+            result[d] = NA
+            continue
+
         current_sum = sum(monthly_values[w] for w in window if monthly_values[w] is not None)
         if not any(monthly_values[w] is not None for w in window):
             result[d] = None
@@ -120,6 +193,9 @@ def compute_trailing_3m_yoy(monthly_values: dict[date, float | None]) -> dict[da
             continue
 
         prior_window = [sorted_dates[j] for j in range(max(0, prior_idx - 2), prior_idx + 1)]
+        if any(monthly_values[w] == NA for w in prior_window):
+            result[d] = NA
+            continue
         prior_sum = sum(monthly_values[w] for w in prior_window if monthly_values[w] is not None)
         if not any(monthly_values[w] is not None for w in prior_window) or prior_sum == 0:
             result[d] = None
@@ -138,6 +214,9 @@ def pct_of(numerator: dict[date, float | None], denominator: dict[date, float | 
     """
     result = {}
     for d, val in numerator.items():
+        if val == NA:
+            result[d] = NA
+            continue
         if prior:
             denom = _prior_value(denominator, d)
         else:
@@ -240,20 +319,27 @@ def build_bank(
     rows = []
     for d in dates:
         row = {"date": d.isoformat()}
-        total = Decimal("0")
-        has_any = False
+        fund_vals = {}
+        has_na = False
         for t in tickers:
             val = fund_data.get(t, {}).get(d)
             row[t] = val
-            if val is not None:
-                total += Decimal(str(val))
-                has_any = True
+            fund_vals[t] = val
+            if val == NA:
+                has_na = True
 
-        if total_fn == "sum":
-            row["Total"] = float(total) if has_any else None
-        elif total_fn is not None:
-            row["Total"] = total_fn(d, {t: fund_data.get(t, {}).get(d) for t in tickers})
+        # If any started fund has N/A, total is N/A
+        if has_na:
+            row["Total"] = NA
+        elif total_fn is not None and callable(total_fn):
+            row["Total"] = total_fn(d, fund_vals)
         else:
+            total = Decimal("0")
+            has_any = False
+            for v in fund_vals.values():
+                if v is not None:
+                    total += Decimal(str(v))
+                    has_any = True
             row["Total"] = float(total) if has_any else None
 
         rows.append(row)

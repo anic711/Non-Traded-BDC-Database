@@ -1,5 +1,6 @@
 """Tab B: Redemptions computation."""
 
+import calendar
 from datetime import date
 from collections import defaultdict
 
@@ -10,6 +11,7 @@ from src.api.services.common import (
     get_fund_list, get_total_nav_lookup, get_shares_outstanding_lookup,
     generate_month_ends, generate_quarter_ends,
     aggregate_quarterly, compute_yoy_growth, pct_of, build_bank, _closest_value, _prior_value,
+    NA, fill_na_after_start, compute_total_with_na,
 )
 
 
@@ -40,7 +42,6 @@ async def get_redemptions_data(start: date, end: date, period: str = "monthly") 
             d = date.fromisoformat(str(dt))
             # Snap to quarter-end in case any date isn't already
             qm = ((d.month - 1) // 3 + 1) * 3
-            import calendar
             qe = date(d.year, qm, calendar.monthrange(d.year, qm)[1])
             if shares is not None:
                 shares_data[ticker][qe] = shares_data[ticker].get(qe, 0) + float(shares)
@@ -52,19 +53,23 @@ async def get_redemptions_data(start: date, end: date, period: str = "monthly") 
     so_lookup = await get_shares_outstanding_lookup()
     so_by_ticker = {fund_id_map[fid]: sos for fid, sos in so_lookup.items() if fid in fund_id_map}
 
+    # Collect all dates and fill N/A after each fund's series starts
     all_dates = set()
     for d in list(shares_data.values()) + list(value_data.values()):
         all_dates.update(d.keys())
+    all_dates_sorted = sorted(all_dates)
+
+    for t in tickers:
+        if t in shares_data:
+            shares_data[t] = fill_na_after_start(shares_data[t], all_dates_sorted)
+        if t in value_data:
+            value_data[t] = fill_na_after_start(value_data[t], all_dates_sorted)
+
     dates = sorted(d for d in all_dates if start <= d <= end)
 
     # Compute totals using all dates (not just filtered range) so Y/Y can find prior-year
-    all_redemption_dates = set()
-    for d in list(shares_data.values()) + list(value_data.values()):
-        all_redemption_dates.update(d.keys())
-    total_shares = {d: sum(shares_data.get(t, {}).get(d, 0) or 0 for t in tickers) for d in all_redemption_dates}
-    total_shares = {d: v for d, v in total_shares.items() if v > 0}
-    total_value = {d: sum(value_data.get(t, {}).get(d, 0) or 0 for t in tickers) for d in all_redemption_dates}
-    total_value = {d: v for d, v in total_value.items() if v > 0}
+    total_shares = compute_total_with_na(shares_data, tickers, all_dates_sorted)
+    total_value = compute_total_with_na(value_data, tickers, all_dates_sorted)
 
     # Sub-banks
     shares_yoy = {t: compute_yoy_growth(shares_data.get(t, {})) for t in tickers}
@@ -75,10 +80,27 @@ async def get_redemptions_data(start: date, end: date, period: str = "monthly") 
     # Total-level derived metrics
     total_shares_yoy = compute_yoy_growth(total_shares)
     total_value_yoy = compute_yoy_growth(total_value)
-    total_so = {d: sum(_prior_value(so_by_ticker.get(t, {}), d) or 0 for t in tickers) for d in dates}
-    total_shares_pct_os = {d: total_shares[d] / total_so[d] if total_so.get(d) and d in total_shares else None for d in dates}
-    total_nav_sum = {d: sum(_prior_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers) for d in dates}
-    total_value_pct_nav = {d: total_value[d] / total_nav_sum[d] if total_nav_sum.get(d) and d in total_value else None for d in dates}
+
+    total_shares_pct_os = {}
+    total_value_pct_nav = {}
+    for d in dates:
+        ts = total_shares.get(d)
+        if ts == NA:
+            total_shares_pct_os[d] = NA
+        elif ts is not None:
+            so_sum = sum(_prior_value(so_by_ticker.get(t, {}), d) or 0 for t in tickers)
+            total_shares_pct_os[d] = ts / so_sum if so_sum > 0 else None
+        else:
+            total_shares_pct_os[d] = None
+
+        tv = total_value.get(d)
+        if tv == NA:
+            total_value_pct_nav[d] = NA
+        elif tv is not None:
+            nav_sum = sum(_prior_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers)
+            total_value_pct_nav[d] = tv / nav_sum if nav_sum > 0 else None
+        else:
+            total_value_pct_nav[d] = None
 
     def _total_from(lookup):
         def fn(d, fund_vals):

@@ -11,6 +11,7 @@ from src.api.services.common import (
     generate_month_ends, generate_quarter_ends,
     aggregate_quarterly, compute_yoy_growth, compute_trailing_3m_yoy,
     pct_of, build_bank, _closest_value, _prior_value,
+    NA, fill_na_after_start, compute_total_with_na,
 )
 
 
@@ -134,18 +135,17 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
         for sales in monthly_sales.values():
             all_data_dates.update(sales.keys())
 
+    # Fill N/A for dates after each fund's series starts
+    all_dates_sorted = sorted(all_data_dates)
+    for ticker in tickers:
+        if ticker in monthly_sales:
+            monthly_sales[ticker] = fill_na_after_start(monthly_sales[ticker], all_dates_sorted)
+
     dates = sorted(d for d in all_data_dates if start <= d <= end)
 
     # Compute total sales across all funds for total-level derived metrics
     # Use all available dates (not just filtered range) so Y/Y can find prior-year values
-    all_sales_dates = set()
-    for sales in monthly_sales.values():
-        all_sales_dates.update(sales.keys())
-    total_sales = {}
-    for d in all_sales_dates:
-        s = sum(monthly_sales.get(t, {}).get(d, 0) or 0 for t in tickers)
-        if s > 0:
-            total_sales[d] = s
+    total_sales = compute_total_with_na(monthly_sales, tickers, all_dates_sorted)
 
     # Compute sub-banks (fund-level)
     yoy_data = {t: compute_yoy_growth(monthly_sales.get(t, {})) for t in tickers}
@@ -177,9 +177,13 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
         pct_nav_data[t] = pct_of(monthly_sales.get(t, {}), nav_by_ticker.get(t, {}), prior=True)
     # Total % of NAV (t-1) = total sales / prior-period total NAV
     for d in dates:
-        nav_sum = sum(_prior_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers)
-        if nav_sum > 0 and d in total_sales:
-            total_nav_all[d] = total_sales[d] / nav_sum
+        ts = total_sales.get(d)
+        if ts == NA:
+            total_nav_all[d] = NA
+        elif ts is not None:
+            nav_sum = sum(_prior_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers)
+            if nav_sum > 0:
+                total_nav_all[d] = ts / nav_sum
 
     def _total_from_dict(lookup):
         def fn(d, fund_vals):

@@ -11,6 +11,7 @@ from src.database import async_session_factory
 from src.api.services.common import (
     get_fund_list, get_total_nav_lookup,
     generate_month_ends, generate_quarter_ends, build_bank,
+    NA, fill_na_after_start,
 )
 
 
@@ -23,6 +24,9 @@ def _compound_quarterly(monthly: dict[date, float]) -> dict[date, float]:
         by_quarter[qe].append(ret)
     quarterly = {}
     for qe, rets in by_quarter.items():
+        if any(r == NA for r in rets):
+            quarterly[qe] = NA
+            continue
         compound = 1.0
         for r in rets:
             compound *= (1 + r)
@@ -134,6 +138,17 @@ async def get_performance_data(start: date, end: date, period: str = "monthly") 
     all_dates = set()
     for p in total_return.values():
         all_dates.update(p.keys())
+    all_dates_sorted = sorted(all_dates)
+
+    # Fill N/A after each fund's series starts (use any_value since returns can be negative)
+    for ticker in tickers:
+        if ticker in total_return:
+            total_return[ticker] = fill_na_after_start(total_return[ticker], all_dates_sorted, any_value=True)
+        if ticker in price_return:
+            price_return[ticker] = fill_na_after_start(price_return[ticker], all_dates_sorted, any_value=True)
+        if ticker in income_return:
+            income_return[ticker] = fill_na_after_start(income_return[ticker], all_dates_sorted, any_value=True)
+
     dates = sorted(d for d in all_dates if start <= d <= end)
 
     # Build total (NAV-weighted average)
@@ -142,6 +157,10 @@ async def get_performance_data(start: date, end: date, period: str = "monthly") 
 
     def weighted_avg_fn(data_dict):
         def weighted_avg(d, fund_vals):
+            # N/A propagation is handled by build_bank (has_na check),
+            # but also guard here in case total_fn is called directly.
+            if any(v == NA for v in fund_vals.values()):
+                return NA
             num = 0.0
             denom = 0.0
             for t, val in fund_vals.items():
