@@ -245,10 +245,22 @@ def _parse_shares_issued_table(
     if not table:
         return records
 
-    # Shares are issued on the 1st of each month; the table reports cumulative
-    # totals "as of the date of this filing", so use filing_date (not as_of,
-    # which refers to the NAV valuation date from the prior month)
-    effective_date = filing_date.replace(day=1)
+    # Determine effective date: check for explicit subscription date reference
+    # e.g., "through the February 1, 2026 subscription date"
+    sub_match = re.search(
+        r"through\s+(?:the\s+)?(\w+)\s*[\s,]*1[,\s]+(\d{4})\s+subscription",
+        full_text, re.IGNORECASE,
+    )
+    if sub_match:
+        try:
+            from datetime import datetime as _dt
+            effective_date = _dt.strptime(
+                f"{sub_match.group(1)} 1 {sub_match.group(2)}", "%B 1 %Y"
+            ).date()
+        except ValueError:
+            effective_date = filing_date.replace(day=1)
+    else:
+        effective_date = filing_date.replace(day=1)
 
     # Detect scale factor from table header (e.g., "dollar amounts in millions")
     consid_scale = Decimal("1")
