@@ -10,8 +10,13 @@ from src.api.services.common import (
     get_fund_list, get_total_nav_lookup,
     generate_month_ends, generate_quarter_ends,
     aggregate_quarterly, compute_yoy_growth, compute_trailing_3m_yoy,
-    pct_of, build_bank,
+    pct_of, build_bank, _closest_value,
 )
+
+
+def _is_rounded(value: float) -> bool:
+    """Check if a consideration value is rounded to the nearest $100M."""
+    return value % 100_000_000 == 0
 
 
 async def get_gross_sales_data(start: date, end: date, period: str = "monthly") -> dict:
@@ -19,15 +24,21 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
 
     Gross sales = monthly delta in cumulative_consideration from shares_issued,
     summed across all share classes and offering types per fund.
+
+    When consideration is rounded (to nearest $100M), uses change in share
+    count × prior-period avg NAV per share for a more precise estimate.
     """
     funds = await get_fund_list()
     tickers = [f["ticker"] for f in funds]
     fund_id_map = {f["id"]: f["ticker"] for f in funds}
+    fund_ticker_to_id = {f["ticker"]: f["id"] for f in funds}
 
-    # Query cumulative consideration summed by (fund_id, as_of_date)
     async with async_session_factory() as session:
+        # Cumulative consideration and shares by (fund_id, as_of_date)
         result = await session.execute(text("""
-            SELECT fund_id, as_of_date, SUM(cumulative_consideration) as total_cum
+            SELECT fund_id, as_of_date,
+                   SUM(cumulative_consideration) as total_cum,
+                   SUM(cumulative_shares) as total_shares
             FROM shares_issued
             WHERE cumulative_consideration IS NOT NULL
             GROUP BY fund_id, as_of_date
@@ -35,24 +46,55 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
         """))
         rows = result.fetchall()
 
-    # Group by fund_id, compute monthly deltas
+        # Average NAV per share by (fund_id, as_of_date) across share classes
+        nav_result = await session.execute(text("""
+            SELECT fund_id, as_of_date, AVG(nav_per_share) as avg_nav
+            FROM nav_per_share
+            WHERE nav_per_share IS NOT NULL
+            GROUP BY fund_id, as_of_date
+        """))
+        nav_rows = nav_result.fetchall()
+
+    # Build NAV lookup: {fund_id: {date: avg_nav}}
+    nav_by_fund = defaultdict(dict)
+    for fund_id, dt, avg_nav in nav_rows:
+        nav_by_fund[fund_id][date.fromisoformat(str(dt))] = float(avg_nav)
+
+    # Group by ticker
     fund_cumulative = defaultdict(list)
-    for fund_id, dt, cum in rows:
+    for fund_id, dt, cum, shares in rows:
         ticker = fund_id_map.get(fund_id)
         if ticker:
-            fund_cumulative[ticker].append((date.fromisoformat(str(dt)), float(cum)))
+            fund_cumulative[ticker].append((
+                date.fromisoformat(str(dt)), float(cum), float(shares)
+            ))
 
     # Compute monthly deltas per fund
     monthly_sales = {}  # {ticker: {date: value}}
     for ticker, data_points in fund_cumulative.items():
         data_points.sort()
         sales = {}
+        fid = fund_ticker_to_id[ticker]
         for i in range(1, len(data_points)):
-            d, cum = data_points[i]
-            _, cum_prev = data_points[i - 1]
-            delta = cum - cum_prev
-            if delta >= 0:  # negative deltas are data artifacts
-                sales[d] = delta
+            d, cum, shares = data_points[i]
+            _, cum_prev, shares_prev = data_points[i - 1]
+            delta_consideration = cum - cum_prev
+            if delta_consideration < 0:  # negative deltas are data artifacts
+                continue
+
+            # If consideration is rounded, use share-based estimate
+            if _is_rounded(cum) and _is_rounded(cum_prev):
+                delta_shares = shares - shares_prev
+                if delta_shares > 0:
+                    # NAV(t-1): find avg NAV closest to the prior data point date
+                    _, d_prev, _ = data_points[i - 1][0], data_points[i - 1][0], None
+                    prior_nav = _closest_value(nav_by_fund.get(fid, {}), d_prev)
+                    if prior_nav:
+                        sales[d] = delta_shares * prior_nav
+                        continue
+            # Fall back to consideration delta
+            if delta_consideration >= 0:
+                sales[d] = delta_consideration
         monthly_sales[ticker] = sales
 
     # Get total NAV for % of NAV
@@ -88,12 +130,23 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
         for ticker, data_points in fund_cumulative.items():
             data_points.sort()
             sales = {}
+            fid = fund_ticker_to_id[ticker]
             for i in range(1, len(data_points)):
-                d, cum = data_points[i]
-                _, cum_prev = data_points[i - 1]
-                delta = cum - cum_prev
-                if delta >= 0:
-                    sales[d] = delta
+                d, cum, shares = data_points[i]
+                _, cum_prev, shares_prev = data_points[i - 1]
+                delta_consideration = cum - cum_prev
+                if delta_consideration < 0:
+                    continue
+                if _is_rounded(cum) and _is_rounded(cum_prev):
+                    delta_shares = shares - shares_prev
+                    if delta_shares > 0:
+                        d_prev = data_points[i - 1][0]
+                        prior_nav = _closest_value(nav_by_fund.get(fid, {}), d_prev)
+                        if prior_nav:
+                            sales[d] = delta_shares * prior_nav
+                            continue
+                if delta_consideration >= 0:
+                    sales[d] = delta_consideration
             monthly_raw[ticker] = sales
         trailing_data = {t: compute_trailing_3m_yoy(monthly_raw.get(t, {})) for t in tickers}
         # Map to quarter-end dates
