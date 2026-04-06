@@ -54,6 +54,31 @@ if os.path.exists(db):
     conn.close()
 " 2>/dev/null || true
 
+# One-time fix: reparse BCRED Q1 2026 SC TO-I/A (offset split between redeemed/tendered)
+python -c "
+import sqlite3, os
+db = os.environ.get('DATABASE_URL_SYNC','').replace('sqlite:///','')
+if os.path.exists(db):
+    conn = sqlite3.connect(db)
+    # Check if BCRED Q1 2026 still has shares_redeemed == shares_tendered (both 151M)
+    row = conn.execute('''
+        SELECT r.id, r.shares_redeemed, r.shares_tendered, f.id as fid
+        FROM redemptions r
+        JOIN filings f ON r.filing_id = f.id
+        JOIN funds fu ON r.fund_id = fu.id
+        WHERE fu.ticker = \"BCRED\" AND r.as_of_date = \"2026-03-31\"
+          AND r.shares_redeemed IS NOT NULL AND r.shares_tendered IS NOT NULL
+          AND ABS(r.shares_redeemed - r.shares_tendered) < 1
+    ''').fetchone()
+    if row:
+        rid, sr, st, fid = row
+        print(f'Resetting BCRED Q1 2026 for reparse (redeemed={sr} == tendered={st})')
+        conn.execute('DELETE FROM redemptions WHERE id=?', (rid,))
+        conn.execute('UPDATE filings SET parse_status=\"pending\", parsed_at=NULL WHERE id=?', (fid,))
+        conn.commit()
+    conn.close()
+" 2>/dev/null || true
+
 # One-time fix: reparse SC TO-I/A filings with wrong as_of dates
 # The parser now extracts offer expiration date snapped to quarter-end.
 python -c "

@@ -303,19 +303,25 @@ def _parse_from_text(text: str, as_of: date) -> RedemptionRecord | None:
                     if upsize:
                         total_pct = Decimal(upsize.group(1))
 
-                    # Additional % from employee/firm investments offsetting redemptions
+                    # The upsize % is the actual shares repurchased by the fund.
+                    redeemed_pct = total_pct
+
+                    # Additional % from employee/firm investments offsetting redemptions.
+                    # This offset enabled the fund to fulfill requests beyond the upsize
+                    # cap — it counts toward shares tendered but not shares redeemed.
+                    offset_pct = Decimal("0")
                     offset = re.search(
                         r"(?:approximately|representing)\s+([\d.]+)%\s+of\s+\w+(?:['\u2019]s)?\s+shares\s+outstanding",
                         text, re.IGNORECASE,
                     )
                     if offset:
-                        total_pct += Decimal(offset.group(1))
+                        offset_pct = Decimal(offset.group(1))
 
                     # Compute shares outstanding from original cap and original %
                     shares_outstanding = original_cap / (original_pct / Decimal("100"))
-                    actual_shares = (total_pct / Decimal("100")) * shares_outstanding
-                    shares_tendered = actual_shares.quantize(Decimal("1"))
-                    shares_redeemed = shares_tendered
+                    tendered_pct = redeemed_pct + offset_pct
+                    shares_tendered = ((tendered_pct / Decimal("100")) * shares_outstanding).quantize(Decimal("1"))
+                    shares_redeemed = ((redeemed_pct / Decimal("100")) * shares_outstanding).quantize(Decimal("1"))
 
     # Default: if shares_tendered known but shares_redeemed still not found,
     # and no mention of pro rata / partial acceptance, assume all tendered = redeemed.
