@@ -60,12 +60,19 @@ async def get_redemption_requests_data(start: date, end: date, period: str = "mo
         qm = ((d.month - 1) // 3 + 1) * 3
         qe = date(d.year, qm, calendar.monthrange(d.year, qm)[1])
 
+        avg_nav = _closest_value(avg_nav_by_fund.get(fund_id, {}), d)
+
+        # Infer shares_tendered from value_redeemed if not available
+        if tendered is None and redeemed is not None:
+            tendered = redeemed
+        if tendered is None and value_red is not None and avg_nav:
+            tendered = value_red / avg_nav
+
         if tendered is not None:
             t_val = float(tendered)
             shares_tendered[ticker][qe] = shares_tendered[ticker].get(qe, 0) + t_val
 
             # Compute value of shares tendered = shares_tendered × avg NAV
-            avg_nav = _closest_value(avg_nav_by_fund.get(fund_id, {}), d)
             if avg_nav:
                 value_tendered[ticker][qe] = value_tendered[ticker].get(qe, 0) + t_val * avg_nav
 

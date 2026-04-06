@@ -34,6 +34,19 @@ async def get_redemptions_data(start: date, end: date, period: str = "monthly") 
         """))
         rows = result.fetchall()
 
+        # Average NAV per share for inferring missing data
+        nav_ps_result = await session.execute(text("""
+            SELECT fund_id, as_of_date, AVG(nav_per_share) as avg_nav
+            FROM nav_per_share
+            WHERE nav_per_share IS NOT NULL
+            GROUP BY fund_id, as_of_date
+        """))
+        nav_ps_rows = nav_ps_result.fetchall()
+
+    avg_nav_by_fund = defaultdict(dict)
+    for fund_id, dt, avg_nav in nav_ps_rows:
+        avg_nav_by_fund[fund_id][date.fromisoformat(str(dt))] = float(avg_nav)
+
     shares_data = defaultdict(dict)  # {ticker: {date: value}}
     value_data = defaultdict(dict)
     for fund_id, dt, shares, value in rows:
@@ -43,6 +56,14 @@ async def get_redemptions_data(start: date, end: date, period: str = "monthly") 
             # Snap to quarter-end in case any date isn't already
             qm = ((d.month - 1) // 3 + 1) * 3
             qe = date(d.year, qm, calendar.monthrange(d.year, qm)[1])
+
+            # Infer missing data using avg NAV per share
+            nav = _closest_value(avg_nav_by_fund.get(fund_id, {}), d)
+            if shares is None and value is not None and nav:
+                shares = value / nav
+            elif value is None and shares is not None and nav:
+                value = shares * nav
+
             if shares is not None:
                 shares_data[ticker][qe] = shares_data[ticker].get(qe, 0) + float(shares)
             if value is not None:
