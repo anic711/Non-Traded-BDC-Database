@@ -35,6 +35,7 @@ function init() {
             document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             state.activeTab = btn.dataset.tab;
+            updatePeriodToggle();
             fetchData();
         });
     });
@@ -63,6 +64,18 @@ function init() {
     document.getElementById('refresh-btn').addEventListener('click', refreshData);
 
     fetchData();
+}
+
+// Tabs where data is always quarterly (no period toggle)
+const QUARTERLY_ONLY_TABS = ['redemptions', 'redemption-requests'];
+
+function updatePeriodToggle() {
+    const toggle = document.getElementById('period-toggle');
+    if (QUARTERLY_ONLY_TABS.includes(state.activeTab)) {
+        toggle.style.display = 'none';
+    } else {
+        toggle.style.display = '';
+    }
 }
 
 // --- Data Refresh ---

@@ -14,7 +14,12 @@ from src.api.services.common import (
 
 
 async def get_redemptions_data(start: date, end: date, period: str = "monthly") -> dict:
-    """Compute redemptions grid data for all funds."""
+    """Compute redemptions grid data for all funds.
+
+    Redemptions are always shown quarterly — each record is attributed to
+    the quarter-end of the quarter in which the tender offer commenced.
+    The period parameter is accepted but ignored.
+    """
     funds = await get_fund_list()
     tickers = [f["ticker"] for f in funds]
     fund_id_map = {f["id"]: f["ticker"] for f in funds}
@@ -33,20 +38,19 @@ async def get_redemptions_data(start: date, end: date, period: str = "monthly") 
         ticker = fund_id_map.get(fund_id)
         if ticker:
             d = date.fromisoformat(str(dt))
+            # Snap to quarter-end in case any date isn't already
+            qm = ((d.month - 1) // 3 + 1) * 3
+            import calendar
+            qe = date(d.year, qm, calendar.monthrange(d.year, qm)[1])
             if shares is not None:
-                shares_data[ticker][d] = float(shares)
+                shares_data[ticker][qe] = shares_data[ticker].get(qe, 0) + float(shares)
             if value is not None:
-                value_data[ticker][d] = float(value)
+                value_data[ticker][qe] = value_data[ticker].get(qe, 0) + float(value)
 
     nav_lookup = await get_total_nav_lookup()
     nav_by_ticker = {fund_id_map[fid]: navs for fid, navs in nav_lookup.items() if fid in fund_id_map}
     so_lookup = await get_shares_outstanding_lookup()
     so_by_ticker = {fund_id_map[fid]: sos for fid, sos in so_lookup.items() if fid in fund_id_map}
-
-    if period == "quarterly":
-        for t in tickers:
-            shares_data[t] = aggregate_quarterly(shares_data.get(t, {}))
-            value_data[t] = aggregate_quarterly(value_data.get(t, {}))
 
     all_dates = set()
     for d in list(shares_data.values()) + list(value_data.values()):

@@ -7,6 +7,7 @@ SC TO-I/A (amended issuer tender offer statement) filings report:
 """
 
 import re
+import calendar
 import logging
 from datetime import date
 from decimal import Decimal
@@ -60,10 +61,31 @@ def parse_sctoi(html: str, filing_date: date) -> ParsedFiling:
 
     tables = extract_tables(soup)
 
-    # Determine as_of_date: use offer expiration date snapped to quarter-end.
-    # SC TO-I/A filings report tender results for a specific quarter — the
-    # expiration date identifies which quarter, not the NAV valuation date.
+    # Determine as_of_date: snap to quarter-end of the quarter the offer commenced.
+    # Use the earlier of "Date Tender Offer First Published" (commencement) and
+    # offer expiry date — the commencement date always precedes expiry, so the
+    # min handles cases where the "published" date on an amendment is actually
+    # the amendment filing date (which can be in the next quarter).
     as_of = None
+
+    def _snap_quarter_end(d):
+        qm = ((d.month - 1) // 3 + 1) * 3
+        return date(d.year, qm, calendar.monthrange(d.year, qm)[1])
+
+    candidate_dates = []
+
+    # Try offer commencement date
+    pub_match = re.search(
+        r"(\w+\s*\??\s*\d{1,2},?\s*\??\s*\d{4})\s*\(Date\s+Tender\s+Offer\s+First\s+Published",
+        text, re.DOTALL,
+    )
+    if pub_match:
+        raw = re.sub(r"[?\s]+", " ", pub_match.group(1)).strip()
+        pub_date = parse_date(raw)
+        if pub_date:
+            candidate_dates.append(pub_date)
+
+    # Try offer expiration date
     expiry_match = re.search(
         r"[Oo]ffer\s+expir\w+.*?(?:on\s+)?(\w+\s*\??\s*\d{1,2},?\s*\??\s*\d{4})",
         text, re.DOTALL,
@@ -72,9 +94,11 @@ def parse_sctoi(html: str, filing_date: date) -> ParsedFiling:
         raw = re.sub(r"[?\s]+", " ", expiry_match.group(1)).strip()
         expiry_date = parse_date(raw)
         if expiry_date:
-            import calendar
-            qm = ((expiry_date.month - 1) // 3 + 1) * 3
-            as_of = date(expiry_date.year, qm, calendar.monthrange(expiry_date.year, qm)[1])
+            candidate_dates.append(expiry_date)
+
+    if candidate_dates:
+        as_of = _snap_quarter_end(min(candidate_dates))
+
     if not as_of:
         as_of = extract_as_of_date(text) or filing_date
 

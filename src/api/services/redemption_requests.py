@@ -14,7 +14,12 @@ from src.api.services.common import (
 
 
 async def get_redemption_requests_data(start: date, end: date, period: str = "monthly") -> dict:
-    """Compute redemption requests grid data for all funds."""
+    """Compute redemption requests grid data for all funds.
+
+    Redemption requests are always shown quarterly — each record is attributed
+    to the quarter-end of the quarter in which the tender offer commenced.
+    The period parameter is accepted but ignored.
+    """
     funds = await get_fund_list()
     tickers = [f["ticker"] for f in funds]
     fund_id_map = {f["id"]: f["ticker"] for f in funds}
@@ -49,29 +54,28 @@ async def get_redemption_requests_data(start: date, end: date, period: str = "mo
         if not ticker:
             continue
         d = date.fromisoformat(str(dt))
+        # Snap to quarter-end
+        qm = ((d.month - 1) // 3 + 1) * 3
+        import calendar
+        qe = date(d.year, qm, calendar.monthrange(d.year, qm)[1])
 
         if tendered is not None:
             t_val = float(tendered)
-            shares_tendered[ticker][d] = t_val
+            shares_tendered[ticker][qe] = shares_tendered[ticker].get(qe, 0) + t_val
 
             # Compute value of shares tendered = shares_tendered × avg NAV
             avg_nav = _closest_value(avg_nav_by_fund.get(fund_id, {}), d)
             if avg_nav:
-                value_tendered[ticker][d] = t_val * avg_nav
+                value_tendered[ticker][qe] = value_tendered[ticker].get(qe, 0) + t_val * avg_nav
 
             # % fulfilled = shares_redeemed / shares_tendered
             if redeemed is not None and t_val > 0:
-                pct_fulfilled[ticker][d] = float(redeemed) / t_val
+                pct_fulfilled[ticker][qe] = float(redeemed) / t_val
 
     nav_lookup = await get_total_nav_lookup()
     nav_by_ticker = {fund_id_map[fid]: navs for fid, navs in nav_lookup.items() if fid in fund_id_map}
     so_lookup = await get_shares_outstanding_lookup()
     so_by_ticker = {fund_id_map[fid]: sos for fid, sos in so_lookup.items() if fid in fund_id_map}
-
-    if period == "quarterly":
-        for t in tickers:
-            shares_tendered[t] = aggregate_quarterly(shares_tendered.get(t, {}))
-            value_tendered[t] = aggregate_quarterly(value_tendered.get(t, {}))
 
     all_dates = set()
     for d in list(shares_tendered.values()) + list(value_tendered.values()):
