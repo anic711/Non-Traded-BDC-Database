@@ -53,10 +53,13 @@ async def get_redemptions_data(start: date, end: date, period: str = "monthly") 
         all_dates.update(d.keys())
     dates = sorted(d for d in all_dates if start <= d <= end)
 
-    # Compute totals for derived metrics
-    total_shares = {d: sum(shares_data.get(t, {}).get(d, 0) or 0 for t in tickers) for d in dates}
+    # Compute totals using all dates (not just filtered range) so Y/Y can find prior-year
+    all_redemption_dates = set()
+    for d in list(shares_data.values()) + list(value_data.values()):
+        all_redemption_dates.update(d.keys())
+    total_shares = {d: sum(shares_data.get(t, {}).get(d, 0) or 0 for t in tickers) for d in all_redemption_dates}
     total_shares = {d: v for d, v in total_shares.items() if v > 0}
-    total_value = {d: sum(value_data.get(t, {}).get(d, 0) or 0 for t in tickers) for d in dates}
+    total_value = {d: sum(value_data.get(t, {}).get(d, 0) or 0 for t in tickers) for d in all_redemption_dates}
     total_value = {d: v for d, v in total_value.items() if v > 0}
 
     # Sub-banks

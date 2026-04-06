@@ -137,8 +137,12 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
     dates = sorted(d for d in all_data_dates if start <= d <= end)
 
     # Compute total sales across all funds for total-level derived metrics
+    # Use all available dates (not just filtered range) so Y/Y can find prior-year values
+    all_sales_dates = set()
+    for sales in monthly_sales.values():
+        all_sales_dates.update(sales.keys())
     total_sales = {}
-    for d in dates:
+    for d in all_sales_dates:
         s = sum(monthly_sales.get(t, {}).get(d, 0) or 0 for t in tickers)
         if s > 0:
             total_sales[d] = s
