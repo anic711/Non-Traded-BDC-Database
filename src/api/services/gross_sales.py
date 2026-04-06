@@ -10,7 +10,7 @@ from src.api.services.common import (
     get_fund_list, get_total_nav_lookup,
     generate_month_ends, generate_quarter_ends,
     aggregate_quarterly, compute_yoy_growth, compute_trailing_3m_yoy,
-    pct_of, build_bank, _closest_value,
+    pct_of, build_bank, _closest_value, _prior_value,
 )
 
 
@@ -170,10 +170,10 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
     pct_nav_data = {}
     total_nav_all = {}
     for t in tickers:
-        pct_nav_data[t] = pct_of(monthly_sales.get(t, {}), nav_by_ticker.get(t, {}))
-    # Total % of NAV = total sales / total NAV across all funds
+        pct_nav_data[t] = pct_of(monthly_sales.get(t, {}), nav_by_ticker.get(t, {}), prior=True)
+    # Total % of NAV (t-1) = total sales / prior-period total NAV
     for d in dates:
-        nav_sum = sum(_closest_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers)
+        nav_sum = sum(_prior_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers)
         if nav_sum > 0 and d in total_sales:
             total_nav_all[d] = total_sales[d] / nav_sum
 
@@ -186,7 +186,7 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
         build_bank("Total Gross Sales", "currency", monthly_sales, tickers, dates),
         build_bank("Y/Y Growth", "percent", yoy_data, tickers, dates, total_fn=_total_from_dict(total_yoy)),
         build_bank("Y/Y Growth - 3M Trailing", "percent", trailing_data, tickers, dates, total_fn=_total_from_dict(total_trailing)),
-        build_bank("% of NAV", "percent", pct_nav_data, tickers, dates, total_fn=_total_from_dict(total_nav_all)),
+        build_bank("% of NAV (t-1)", "percent", pct_nav_data, tickers, dates, total_fn=_total_from_dict(total_nav_all)),
     ]
 
     return {"funds": tickers, "banks": banks}

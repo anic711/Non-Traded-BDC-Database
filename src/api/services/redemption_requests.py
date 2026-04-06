@@ -9,7 +9,7 @@ from src.database import async_session_factory
 from src.api.services.common import (
     get_fund_list, get_total_nav_lookup, get_shares_outstanding_lookup,
     generate_month_ends, generate_quarter_ends,
-    aggregate_quarterly, pct_of, build_bank, _closest_value,
+    aggregate_quarterly, pct_of, build_bank, _closest_value, _prior_value,
 )
 
 
@@ -78,17 +78,17 @@ async def get_redemption_requests_data(start: date, end: date, period: str = "mo
         all_dates.update(d.keys())
     dates = sorted(d for d in all_dates if start <= d <= end)
 
-    shares_pct_os = {t: pct_of(shares_tendered.get(t, {}), so_by_ticker.get(t, {})) for t in tickers}
-    value_pct_nav = {t: pct_of(value_tendered.get(t, {}), nav_by_ticker.get(t, {})) for t in tickers}
+    shares_pct_os = {t: pct_of(shares_tendered.get(t, {}), so_by_ticker.get(t, {}), prior=True) for t in tickers}
+    value_pct_nav = {t: pct_of(value_tendered.get(t, {}), nav_by_ticker.get(t, {}), prior=True) for t in tickers}
 
     # Total-level derived metrics
     total_shares = {d: sum(shares_tendered.get(t, {}).get(d, 0) or 0 for t in tickers) for d in dates}
     total_shares = {d: v for d, v in total_shares.items() if v > 0}
     total_value = {d: sum(value_tendered.get(t, {}).get(d, 0) or 0 for t in tickers) for d in dates}
     total_value = {d: v for d, v in total_value.items() if v > 0}
-    total_so = {d: sum(_closest_value(so_by_ticker.get(t, {}), d) or 0 for t in tickers) for d in dates}
+    total_so = {d: sum(_prior_value(so_by_ticker.get(t, {}), d) or 0 for t in tickers) for d in dates}
     total_shares_pct_os = {d: total_shares[d] / total_so[d] if total_so.get(d) and d in total_shares else None for d in dates}
-    total_nav_sum = {d: sum(_closest_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers) for d in dates}
+    total_nav_sum = {d: sum(_prior_value(nav_by_ticker.get(t, {}), d) or 0 for t in tickers) for d in dates}
     total_value_pct_nav = {d: total_value[d] / total_nav_sum[d] if total_nav_sum.get(d) and d in total_value else None for d in dates}
 
     # Total % fulfilled = total shares redeemed / total shares tendered
@@ -112,9 +112,9 @@ async def get_redemption_requests_data(start: date, end: date, period: str = "mo
 
     banks = [
         build_bank("Shares Tendered", "number", dict(shares_tendered), tickers, dates),
-        build_bank("% of Shares O/S", "percent", shares_pct_os, tickers, dates, total_fn=_total_from(total_shares_pct_os)),
+        build_bank("% of Shares O/S (t-1)", "percent", shares_pct_os, tickers, dates, total_fn=_total_from(total_shares_pct_os)),
         build_bank("Value of Shares Tendered", "currency", dict(value_tendered), tickers, dates),
-        build_bank("% of NAV", "percent", value_pct_nav, tickers, dates, total_fn=_total_from(total_value_pct_nav)),
+        build_bank("% of NAV (t-1)", "percent", value_pct_nav, tickers, dates, total_fn=_total_from(total_value_pct_nav)),
         build_bank("% Fulfilled", "percent", dict(pct_fulfilled), tickers, dates, total_fn=_total_from(total_redeemed)),
     ]
 

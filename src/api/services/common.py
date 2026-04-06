@@ -130,16 +130,36 @@ def compute_trailing_3m_yoy(monthly_values: dict[date, float | None]) -> dict[da
     return result
 
 
-def pct_of(numerator: dict[date, float | None], denominator: dict[date, float | None]) -> dict[date, float | None]:
-    """Compute numerator / denominator for matching dates."""
+def pct_of(numerator: dict[date, float | None], denominator: dict[date, float | None], prior: bool = False) -> dict[date, float | None]:
+    """Compute numerator / denominator for matching dates.
+
+    If prior=True, use the most recent denominator value strictly before
+    the numerator date (t-1 semantics).
+    """
     result = {}
     for d, val in numerator.items():
-        denom = _closest_value(denominator, d)
+        if prior:
+            denom = _prior_value(denominator, d)
+        else:
+            denom = _closest_value(denominator, d)
         if val is not None and denom is not None and denom != 0:
             result[d] = val / denom
         else:
             result[d] = None
     return result
+
+
+def _prior_value(lookup: dict[date, float | None], target: date) -> float | None:
+    """Find the most recent value strictly before target date, within 95 days."""
+    best = None
+    best_dist = 999
+    for d, v in lookup.items():
+        if v is not None and d < target:
+            dist = (target - d).days
+            if dist < best_dist and dist <= 95:
+                best = v
+                best_dist = dist
+    return best
 
 
 def _closest_value(lookup: dict[date, float | None], target: date) -> float | None:

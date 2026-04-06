@@ -222,7 +222,7 @@ function formatNumber(val) {
 }
 
 function formatPercent(val) {
-    return (val * 100).toFixed(0) + '%';
+    return (val * 100).toFixed(1) + '%';
 }
 
 function formatDateLabel(dateStr) {
