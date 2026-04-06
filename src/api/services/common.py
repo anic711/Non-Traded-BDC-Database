@@ -228,12 +228,14 @@ def build_bank(
     tickers: list[str],
     dates: list[date],
     total_fn=None,
+    subtitle: str | None = None,
 ) -> dict:
     """Build a bank dict for the API response.
 
     Args:
         fund_data: {ticker: {date: value}}
         total_fn: callable(date, {ticker: value}) -> total, or 'sum' for simple sum
+        subtitle: optional italic subtitle below the bank name
     """
     rows = []
     for d in dates:
@@ -255,4 +257,7 @@ def build_bank(
             row["Total"] = float(total) if has_any else None
 
         rows.append(row)
-    return {"name": name, "format": fmt, "rows": rows}
+    result = {"name": name, "format": fmt, "rows": rows}
+    if subtitle:
+        result["subtitle"] = subtitle
+    return result

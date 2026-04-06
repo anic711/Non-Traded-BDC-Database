@@ -133,6 +133,12 @@ function renderGrid() {
         const header = document.createElement('div');
         header.className = 'bank-header';
         header.textContent = bank.name;
+        if (bank.subtitle) {
+            const sub = document.createElement('span');
+            sub.className = 'bank-subtitle';
+            sub.textContent = ' ' + bank.subtitle;
+            header.appendChild(sub);
+        }
         section.appendChild(header);
 
         const wrapper = document.createElement('div');

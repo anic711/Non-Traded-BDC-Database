@@ -126,6 +126,15 @@ main { padding: 0 24px 24px; }
     letter-spacing: 0.5px;
 }
 
+.bank-subtitle {
+    font-style: italic;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: #7f8c8d;
+    font-size: 11px;
+}
+
 /* Table wrapper for horizontal scroll */
 .table-wrapper {
     overflow-x: auto;
