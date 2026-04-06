@@ -29,5 +29,30 @@ else
     echo "Database has $FILING_COUNT filings — skipping initial load."
 fi
 
+# One-time fix: reparse HLEND filings that had wrong effective dates
+python -c "
+import sqlite3, os
+db = os.environ.get('DATABASE_URL_SYNC','').replace('sqlite:///','')
+if os.path.exists(db):
+    conn = sqlite3.connect(db)
+    # Check if HLEND is missing Nov 2025 / Feb 2026 shares_issued
+    hlend_id = conn.execute(\"SELECT id FROM funds WHERE ticker='HLEND'\").fetchone()
+    if hlend_id:
+        hlend_id = hlend_id[0]
+        missing = conn.execute(
+            'SELECT COUNT(*) FROM shares_issued WHERE fund_id=? AND as_of_date IN (\"2025-11-01\",\"2026-02-01\")',
+            (hlend_id,)
+        ).fetchone()[0]
+        if missing == 0:
+            # Reset these filings so pipeline will reparse them
+            conn.execute(
+                'UPDATE filings SET parse_status=\"pending\", parsed_at=NULL WHERE fund_id=? AND filing_date IN (\"2025-12-01\",\"2026-03-03\")',
+                (hlend_id,)
+            )
+            conn.commit()
+            print('Reset HLEND filings for reparse')
+    conn.close()
+" 2>/dev/null || true
+
 echo "Starting server on port ${PORT:-8000}..."
 exec uvicorn src.api.app:app --host 0.0.0.0 --port "${PORT:-8000}"
