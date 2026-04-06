@@ -183,7 +183,7 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
         return fn
 
     banks = [
-        build_bank("Total Gross Sales", "currency", monthly_sales, tickers, dates),
+        build_bank("Gross Sales", "currency", monthly_sales, tickers, dates),
         build_bank("Y/Y Growth", "percent", yoy_data, tickers, dates, total_fn=_total_from_dict(total_yoy)),
         build_bank("Y/Y Growth - 3M Trailing", "percent", trailing_data, tickers, dates, total_fn=_total_from_dict(total_trailing)),
         build_bank("% of NAV (t-1)", "percent", pct_nav_data, tickers, dates, total_fn=_total_from_dict(total_nav_all)),

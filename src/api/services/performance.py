@@ -51,7 +51,7 @@ async def get_performance_data(start: date, end: date, period: str = "monthly") 
     for fund_id, dt, cls, val in dist_rows:
         dist_by_fund[fund_id][date.fromisoformat(str(dt))][cls] = float(val)
 
-    # Compute monthly performance per fund (average across classes)
+    # Compute monthly performance per fund using Class I only
     monthly_perf = {}  # {ticker: {date: perf}}
     for fund in funds:
         fid = fund["id"]
@@ -63,18 +63,31 @@ async def get_performance_data(start: date, end: date, period: str = "monthly") 
         for i in range(1, len(dates_sorted)):
             d = dates_sorted[i]
             d_prev = dates_sorted[i - 1]
-            classes = set(nav_data[d].keys()) & set(nav_data[d_prev].keys())
-            if not classes:
-                continue
-            class_perfs = []
-            for cls in classes:
+            # Use Class I; fall back to average across classes if Class I unavailable
+            class_i_keys = [k for k in nav_data[d] if "I" in k and "II" not in k]
+            class_i_prev = [k for k in nav_data[d_prev] if "I" in k and "II" not in k]
+            if class_i_keys and class_i_prev:
+                cls = class_i_keys[0]
+                cls_prev = class_i_prev[0]
                 nav_t = nav_data[d][cls]
-                nav_prev = nav_data[d_prev][cls]
+                nav_prev = nav_data[d_prev][cls_prev]
                 dist_t = dist_data.get(d, {}).get(cls, 0)
                 if nav_prev and nav_prev > 0:
-                    class_perfs.append((nav_t - nav_prev + dist_t) / nav_prev)
-            if class_perfs:
-                perf[d] = sum(class_perfs) / len(class_perfs)
+                    perf[d] = (nav_t - nav_prev + dist_t) / nav_prev
+            else:
+                # Fallback: average across all classes
+                classes = set(nav_data[d].keys()) & set(nav_data[d_prev].keys())
+                if not classes:
+                    continue
+                class_perfs = []
+                for cls in classes:
+                    nav_t = nav_data[d][cls]
+                    nav_prev = nav_data[d_prev][cls]
+                    dist_t = dist_data.get(d, {}).get(cls, 0)
+                    if nav_prev and nav_prev > 0:
+                        class_perfs.append((nav_t - nav_prev + dist_t) / nav_prev)
+                if class_perfs:
+                    perf[d] = sum(class_perfs) / len(class_perfs)
         monthly_perf[ticker] = perf
 
     # For quarterly: compound monthly returns within each quarter
