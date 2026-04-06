@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 from src.parsers.base import ParsedFiling, RedemptionRecord
 from src.parsers.utils import (
     extract_tables, find_table_with_keywords, extract_as_of_date,
-    clean_numeric,
+    clean_numeric, parse_date,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,23 @@ def parse_sctoi(html: str, filing_date: date) -> ParsedFiling:
 
     tables = extract_tables(soup)
 
-    as_of = extract_as_of_date(text) or filing_date
+    # Determine as_of_date: use offer expiration date snapped to quarter-end.
+    # SC TO-I/A filings report tender results for a specific quarter — the
+    # expiration date identifies which quarter, not the NAV valuation date.
+    as_of = None
+    expiry_match = re.search(
+        r"[Oo]ffer\s+expir\w+.*?(?:on\s+)?(\w+\s*\??\s*\d{1,2},?\s*\??\s*\d{4})",
+        text, re.DOTALL,
+    )
+    if expiry_match:
+        raw = re.sub(r"[?\s]+", " ", expiry_match.group(1)).strip()
+        expiry_date = parse_date(raw)
+        if expiry_date:
+            import calendar
+            qm = ((expiry_date.month - 1) // 3 + 1) * 3
+            as_of = date(expiry_date.year, qm, calendar.monthrange(expiry_date.year, qm)[1])
+    if not as_of:
+        as_of = extract_as_of_date(text) or filing_date
 
     # Try table-based extraction first
     redemption = _parse_from_tables(tables, text, as_of)
