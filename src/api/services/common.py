@@ -158,11 +158,16 @@ def _closest_value(lookup: dict[date, float | None], target: date) -> float | No
 
 
 async def get_fund_list() -> list[dict]:
-    """Return active funds ordered by ticker."""
+    """Return active funds ordered by latest total NAV descending."""
     async with async_session_factory() as session:
-        result = await session.execute(text(
-            "SELECT id, ticker, name FROM funds WHERE active = 1 ORDER BY ticker"
-        ))
+        result = await session.execute(text("""
+            SELECT f.id, f.ticker, f.name, COALESCE(tn.total_nav, 0) as latest_nav
+            FROM funds f
+            LEFT JOIN total_nav tn ON tn.fund_id = f.id
+                AND tn.as_of_date = (SELECT MAX(as_of_date) FROM total_nav WHERE fund_id = f.id)
+            WHERE f.active = 1
+            ORDER BY latest_nav DESC
+        """))
         return [{"id": r[0], "ticker": r[1], "name": r[2]} for r in result.fetchall()]
 
 
