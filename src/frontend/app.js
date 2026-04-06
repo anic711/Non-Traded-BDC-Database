@@ -96,6 +96,7 @@ function renderGrid() {
     if (!state.data || !state.data.banks) return;
 
     const { funds, banks } = state.data;
+    const fundRows = [...funds, 'Total'];
 
     for (const bank of banks) {
         const section = document.createElement('div');
@@ -106,36 +107,38 @@ function renderGrid() {
         header.textContent = bank.name;
         section.appendChild(header);
 
+        const wrapper = document.createElement('div');
+        wrapper.className = 'table-wrapper';
+
         const table = document.createElement('table');
         table.className = 'data-table';
 
-        // Header row
+        const rows = bank.rows || [];
+
+        // Header row: Fund | date1 | date2 | ...
         const thead = document.createElement('thead');
         const headerRow = document.createElement('tr');
-        headerRow.appendChild(th('Date'));
-        for (const fund of funds) {
-            headerRow.appendChild(th(fund));
+        headerRow.appendChild(th(''));
+        for (const row of rows) {
+            headerRow.appendChild(th(formatDateLabel(row.date)));
         }
-        headerRow.appendChild(th('Total'));
         thead.appendChild(headerRow);
         table.appendChild(thead);
 
-        // Data rows
+        // One row per fund + Total
         const tbody = document.createElement('tbody');
-        const rows = bank.rows || [];
-        // Show most recent first
-        for (let i = rows.length - 1; i >= 0; i--) {
-            const row = rows[i];
+        for (const fund of fundRows) {
             const tr = document.createElement('tr');
-            tr.appendChild(td(formatDateLabel(row.date), 'text'));
-            for (const fund of funds) {
+            if (fund === 'Total') tr.className = 'total-row';
+            tr.appendChild(td(fund, 'text'));
+            for (const row of rows) {
                 tr.appendChild(td(row[fund], bank.format));
             }
-            tr.appendChild(td(row.Total, bank.format));
             tbody.appendChild(tr);
         }
         table.appendChild(tbody);
-        section.appendChild(table);
+        wrapper.appendChild(table);
+        section.appendChild(wrapper);
         container.appendChild(section);
     }
 }
