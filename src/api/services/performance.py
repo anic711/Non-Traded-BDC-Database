@@ -160,11 +160,11 @@ async def get_performance_data(start: date, end: date, period: str = "monthly") 
         return weighted_avg
 
     banks = [
-        build_bank("Total Return", "percent", total_return, tickers, dates,
+        build_bank("Total Return", "percent1", total_return, tickers, dates,
                     total_fn=weighted_avg_fn(total_return), subtitle="Class I shareholders"),
-        build_bank("Price Return", "percent", price_return, tickers, dates,
+        build_bank("Price Return", "percent1", price_return, tickers, dates,
                     total_fn=weighted_avg_fn(price_return), subtitle="Class I shareholders"),
-        build_bank("Income Return", "percent", income_return, tickers, dates,
+        build_bank("Income Return", "percent1", income_return, tickers, dates,
                     total_fn=weighted_avg_fn(income_return), subtitle="Class I shareholders"),
     ]
 

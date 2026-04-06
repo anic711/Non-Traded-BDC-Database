@@ -81,10 +81,10 @@ async def get_redemptions_data(start: date, end: date, period: str = "monthly") 
     banks = [
         build_bank("Shares Redeemed", "number", dict(shares_data), tickers, dates),
         build_bank("Y/Y Growth (Shares)", "percent", shares_yoy, tickers, dates, total_fn=_total_from(total_shares_yoy)),
-        build_bank("% of Shares O/S (t-1)", "percent", shares_pct_os, tickers, dates, total_fn=_total_from(total_shares_pct_os)),
+        build_bank("% of Shares O/S (t-1)", "percent1", shares_pct_os, tickers, dates, total_fn=_total_from(total_shares_pct_os)),
         build_bank("Value of Shares Redeemed", "currency", dict(value_data), tickers, dates),
         build_bank("Y/Y Growth (Value)", "percent", value_yoy, tickers, dates, total_fn=_total_from(total_value_yoy)),
-        build_bank("% of NAV (t-1)", "percent", value_pct_nav, tickers, dates, total_fn=_total_from(total_value_pct_nav)),
+        build_bank("% of NAV (t-1)", "percent1", value_pct_nav, tickers, dates, total_fn=_total_from(total_value_pct_nav)),
     ]
 
     return {"funds": tickers, "banks": banks}

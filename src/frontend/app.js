@@ -204,7 +204,11 @@ function td(value, format) {
     if (format === 'currency') {
         el.textContent = formatCurrency(num);
     } else if (format === 'percent') {
-        el.textContent = formatPercent(num);
+        el.textContent = (num * 100).toFixed(0) + '%';
+        if (num > 0) el.className = 'val-positive';
+        else if (num < 0) el.className = 'val-negative';
+    } else if (format === 'percent1') {
+        el.textContent = (num * 100).toFixed(1) + '%';
         if (num > 0) el.className = 'val-positive';
         else if (num < 0) el.className = 'val-negative';
     } else if (format === 'number') {
@@ -231,9 +235,6 @@ function formatNumber(val) {
     return addCommas(val.toFixed(0));
 }
 
-function formatPercent(val) {
-    return (val * 100).toFixed(1) + '%';
-}
 
 function formatDateLabel(dateStr) {
     // "2025-03-31" -> "Mar 2025"
