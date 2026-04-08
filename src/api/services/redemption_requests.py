@@ -62,7 +62,11 @@ async def get_redemption_requests_data(start: date, end: date, period: str = "mo
 
         avg_nav = _closest_value(avg_nav_by_fund.get(fund_id, {}), d)
 
-        # Infer shares_tendered from value_redeemed if not available
+        # Infer shares_redeemed from value_redeemed if not available
+        if redeemed is None and value_red is not None and avg_nav:
+            redeemed = value_red / avg_nav
+
+        # Infer shares_tendered from shares_redeemed if not available
         if tendered is None and redeemed is not None:
             tendered = redeemed
         if tendered is None and value_red is not None and avg_nav:
