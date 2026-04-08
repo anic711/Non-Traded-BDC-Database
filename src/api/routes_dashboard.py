@@ -177,7 +177,7 @@ async def export_xlsx(
                         cell.value = "-"
                     elif val == "N/A":
                         cell.value = "N/A"
-                    elif fmt in ("percent", "percent1"):
+                    elif fmt in ("percent", "percent1", "percent1_color"):
                         cell.value = float(val)
                         cell.number_format = pct_fmt if fmt == "percent1" else pct0_fmt
                     elif fmt == "currency":

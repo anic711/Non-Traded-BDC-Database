@@ -340,6 +340,10 @@ function td(value, format) {
         else if (num < 0) el.className = 'val-negative';
     } else if (format === 'percent1') {
         el.textContent = (num * 100).toFixed(1) + '%';
+    } else if (format === 'percent1_color') {
+        el.textContent = (num * 100).toFixed(1) + '%';
+        if (num > 0) el.className = 'val-positive';
+        else if (num < 0) el.className = 'val-negative';
     } else if (format === 'number') {
         el.textContent = formatNumber(num);
     } else {

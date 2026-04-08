@@ -11,6 +11,31 @@ from src.api.services.common import (
 )
 
 
+def _yoy_growth_signed(values: dict) -> dict:
+    """Y/Y growth that returns N/A when the sign flips between periods."""
+    raw = compute_yoy_growth(values)
+    for d, g in raw.items():
+        if g is None or g == NA:
+            continue
+        val = values.get(d)
+        # Find prior year value
+        try:
+            prior_d = d.replace(year=d.year - 1)
+        except ValueError:
+            prior_d = date(d.year - 1, d.month, 28)
+        prior_val = None
+        for c in values:
+            if c.year == prior_d.year and c.month == prior_d.month:
+                prior_val = values[c]
+                break
+        if prior_val is None or prior_val == NA or val is None or val == NA:
+            continue
+        # Sign change → N/A
+        if (val >= 0) != (prior_val >= 0):
+            raw[d] = NA
+    return raw
+
+
 async def get_net_flows_data(start: date, end: date, period: str = "quarterly") -> dict:
     """Compute net flows = quarterly gross sales + quarterly redemptions (negative).
 
@@ -79,9 +104,9 @@ async def get_net_flows_data(start: date, end: date, period: str = "quarterly") 
     # Total net flows
     total_net = compute_total_with_na(net_flows, tickers, all_dates_sorted)
 
-    # Y/Y growth
-    yoy_data = {t: compute_yoy_growth(net_flows.get(t, {})) for t in tickers}
-    total_yoy = compute_yoy_growth(total_net)
+    # Y/Y growth (N/A on sign change since growth % is meaningless)
+    yoy_data = {t: _yoy_growth_signed(net_flows.get(t, {})) for t in tickers}
+    total_yoy = _yoy_growth_signed(total_net)
 
     # % of NAV (t-1)
     nav_lookup = await get_total_nav_lookup()
