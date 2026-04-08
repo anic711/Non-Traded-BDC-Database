@@ -14,6 +14,7 @@ const ENDPOINTS = {
     'redemptions': '/api/dashboard/redemptions',
     'performance': '/api/dashboard/performance',
     'redemption-requests': '/api/dashboard/redemption-requests',
+    'net-flows': '/api/dashboard/net-flows',
 };
 
 // --- Initialization ---
@@ -100,7 +101,7 @@ function clearPresetHighlight() {
 }
 
 // Tabs where data is always quarterly (no period toggle)
-const QUARTERLY_ONLY_TABS = ['redemptions', 'redemption-requests'];
+const QUARTERLY_ONLY_TABS = ['redemptions', 'redemption-requests', 'net-flows'];
 
 function updatePeriodToggle() {
     const toggle = document.getElementById('period-toggle');

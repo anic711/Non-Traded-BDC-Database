@@ -11,6 +11,7 @@ from src.api.services.gross_sales import get_gross_sales_data
 from src.api.services.redemptions import get_redemptions_data
 from src.api.services.performance import get_performance_data
 from src.api.services.redemption_requests import get_redemption_requests_data
+from src.api.services.net_flows import get_net_flows_data
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dashboard")
@@ -74,11 +75,22 @@ async def dashboard_redemption_requests(
     return await get_redemption_requests_data(start_date, end_date, period)
 
 
+@router.get("/net-flows")
+async def dashboard_net_flows(
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+    period: str = Query("monthly"),
+):
+    start_date, end_date = _default_dates(start, end)
+    return await get_net_flows_data(start_date, end_date, period)
+
+
 TAB_CONFIG = [
     ("Gross Sales", get_gross_sales_data, "monthly"),
     ("Redemptions", get_redemptions_data, "quarterly"),
     ("Performance", get_performance_data, "monthly"),
     ("Redemption Requests", get_redemption_requests_data, "quarterly"),
+    ("Net Flows", get_net_flows_data, "quarterly"),
 ]
 
 

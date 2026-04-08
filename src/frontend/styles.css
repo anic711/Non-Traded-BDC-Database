@@ -24,6 +24,10 @@
     --transition: 150ms ease;
 }
 
+html, body {
+    overflow-x: hidden;
+}
+
 body {
     font-family: var(--font);
     background: var(--bg);
@@ -91,9 +95,11 @@ body {
 .main-area {
     margin-left: 200px;
     flex: 1;
+    min-width: 0;          /* allow flex child to shrink below content size */
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    overflow-x: hidden;
 }
 
 /* === Toolbar === */
@@ -316,6 +322,7 @@ main {
 /* === Tables === */
 .table-wrapper {
     overflow-x: auto;
+    max-width: 100%;
     background: var(--surface);
     border-radius: var(--radius);
     border: 1px solid var(--border);
@@ -349,7 +356,7 @@ main {
     font-size: 13px;
 }
 
-/* Sticky first column */
+/* Sticky first column (frozen ticker column) */
 .data-table th:first-child,
 .data-table td:first-child {
     text-align: left;
@@ -359,6 +366,8 @@ main {
     left: 0;
     z-index: 1;
     background: var(--surface);
+    border-right: 1px solid var(--border);
+    box-shadow: 2px 0 4px rgba(0,0,0,0.04);
 }
 
 .data-table th:first-child {
@@ -375,6 +384,7 @@ main {
 
 .data-table .total-row td:first-child {
     background: #f8f9fb;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.04);
 }
 
 /* Hover */
