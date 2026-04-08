@@ -160,9 +160,9 @@ from src.parsers.filing_8k import parse_8k
 from src.parsers.filing_10q10k import parse_10q10k
 from src.database import async_session_factory
 from src.collectors.pipeline import _store_parsed_data, _parse_filing
-from src.collectors.edgar_types import FilingInfo
+from src.edgar.filing_index import FilingInfo
 from sqlalchemy import text as sql_text
-from src.database.models import Filing
+from src.models import Filing
 
 async def reparse():
     for fid, fund_id, form_type, fdate_str, html in pending:
