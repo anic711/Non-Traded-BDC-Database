@@ -130,7 +130,6 @@ def compute_yoy_growth(values: dict[date, float | None]) -> dict[date, float | N
             result[d] = NA
             continue
         if val is None:
-            result[d] = None
             continue
         # Find date ~12 months ago
         try:
@@ -174,7 +173,6 @@ def compute_trailing_3m_yoy(monthly_values: dict[date, float | None]) -> dict[da
 
         current_sum = sum(monthly_values[w] for w in window if monthly_values[w] is not None)
         if not any(monthly_values[w] is not None for w in window):
-            result[d] = None
             continue
 
         # Same 3-month window a year ago
