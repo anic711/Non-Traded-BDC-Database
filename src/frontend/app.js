@@ -6,7 +6,7 @@ const state = {
     start: null,
     end: null,
     data: null,
-    presetYears: 2,
+    presetYears: 1,
 };
 
 const ENDPOINTS = {
@@ -20,7 +20,7 @@ const ENDPOINTS = {
 // --- Initialization ---
 
 function init() {
-    setDatePreset(2);
+    setDatePreset(1);
 
     // Tab listeners
     document.querySelectorAll('.tab').forEach(btn => {

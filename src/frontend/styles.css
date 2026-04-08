@@ -398,7 +398,7 @@ main {
 /* Value colors */
 .val-positive { color: var(--positive); }
 .val-negative { color: var(--negative); }
-.val-na { color: var(--text-muted); font-style: italic; }
+.val-na { color: var(--text); }
 
 /* === Responsive === */
 @media (max-width: 900px) {
