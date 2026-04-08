@@ -20,46 +20,46 @@ def _is_rounded(value: float) -> bool:
     return value % 100_000_000 == 0
 
 
-def _compute_monthly_deltas(fund_cumulative, fund_ticker_to_id, nav_by_fund):
-    """Compute monthly sales from cumulative data, with interpolation for gaps."""
-    monthly_sales = {}
-    for ticker, data_points in fund_cumulative.items():
-        data_points.sort()
-        sales = {}
-        fid = fund_ticker_to_id[ticker]
-        for i in range(1, len(data_points)):
-            d, cum, shares = data_points[i]
-            d_prev, cum_prev, shares_prev = data_points[i - 1]
-            delta_consideration = cum - cum_prev
-            if delta_consideration < 0:
-                continue
+def _compute_class_monthly_deltas(data_points, nav_lookup):
+    """Compute monthly sales for a single share class series.
 
-            sale_amount = None
-            if _is_rounded(cum) and _is_rounded(cum_prev):
-                delta_shares = shares - shares_prev
-                if delta_shares > 0:
-                    prior_nav = _closest_value(nav_by_fund.get(fid, {}), d_prev)
-                    if prior_nav:
-                        sale_amount = delta_shares * prior_nav
-            if sale_amount is None and delta_consideration >= 0:
-                sale_amount = delta_consideration
+    Args:
+        data_points: sorted list of (date, cumulative_consideration, cumulative_shares)
+        nav_lookup: {date: nav_per_share} for this share class
+    """
+    sales = {}
+    for i in range(1, len(data_points)):
+        d, cum, shares = data_points[i]
+        d_prev, cum_prev, shares_prev = data_points[i - 1]
+        delta_consideration = cum - cum_prev
+        if delta_consideration < 0:
+            continue
 
-            if sale_amount is None:
-                continue
+        sale_amount = None
+        if _is_rounded(cum) and _is_rounded(cum_prev):
+            delta_shares = shares - shares_prev
+            if delta_shares > 0:
+                prior_nav = _closest_value(nav_lookup, d_prev)
+                if prior_nav:
+                    sale_amount = delta_shares * prior_nav
+        if sale_amount is None and delta_consideration >= 0:
+            sale_amount = delta_consideration
 
-            # If data points span multiple months, split evenly
-            months_gap = (d.year - d_prev.year) * 12 + (d.month - d_prev.month)
-            if months_gap > 1:
-                per_month = sale_amount / months_gap
-                for m in range(1, months_gap + 1):
-                    mo = d_prev.month + m
-                    yr = d_prev.year + (mo - 1) // 12
-                    mo = (mo - 1) % 12 + 1
-                    sales[date(yr, mo, 1)] = per_month
-            else:
-                sales[d] = sale_amount
-        monthly_sales[ticker] = sales
-    return monthly_sales
+        if sale_amount is None:
+            continue
+
+        # If data points span multiple months, split evenly
+        months_gap = (d.year - d_prev.year) * 12 + (d.month - d_prev.month)
+        if months_gap > 1:
+            per_month = sale_amount / months_gap
+            for m in range(1, months_gap + 1):
+                mo = d_prev.month + m
+                yr = d_prev.year + (mo - 1) // 12
+                mo = (mo - 1) % 12 + 1
+                sales[date(yr, mo, 1)] = sales.get(date(yr, mo, 1), 0) + per_month
+        else:
+            sales[d] = sales.get(d, 0) + sale_amount
+    return sales
 
 
 async def get_gross_sales_data(start: date, end: date, period: str = "monthly") -> dict:
@@ -77,42 +77,48 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
     fund_ticker_to_id = {f["ticker"]: f["id"] for f in funds}
 
     async with async_session_factory() as session:
-        # Cumulative consideration and shares by (fund_id, as_of_date)
+        # Cumulative consideration and shares per share class
         result = await session.execute(text("""
-            SELECT fund_id, as_of_date,
-                   SUM(cumulative_consideration) as total_cum,
-                   SUM(cumulative_shares) as total_shares
+            SELECT fund_id, as_of_date, share_class, offering_type,
+                   cumulative_consideration, cumulative_shares
             FROM shares_issued
             WHERE cumulative_consideration IS NOT NULL
-            GROUP BY fund_id, as_of_date
-            ORDER BY fund_id, as_of_date
+            ORDER BY fund_id, share_class, offering_type, as_of_date
         """))
         rows = result.fetchall()
 
-        # Average NAV per share by (fund_id, as_of_date) across share classes
+        # NAV per share by (fund_id, as_of_date, share_class)
         nav_result = await session.execute(text("""
-            SELECT fund_id, as_of_date, AVG(nav_per_share) as avg_nav
+            SELECT fund_id, as_of_date, share_class, nav_per_share
             FROM nav_per_share
             WHERE nav_per_share IS NOT NULL
-            GROUP BY fund_id, as_of_date
         """))
         nav_rows = nav_result.fetchall()
 
-    # Build NAV lookup: {fund_id: {date: avg_nav}}
-    nav_by_fund = defaultdict(dict)
-    for fund_id, dt, avg_nav in nav_rows:
-        nav_by_fund[fund_id][date.fromisoformat(str(dt))] = float(avg_nav)
+    # Build NAV lookup: {(fund_id, share_class): {date: nav}}
+    nav_by_class = defaultdict(dict)
+    for fund_id, dt, share_class, nav in nav_rows:
+        nav_by_class[(fund_id, share_class)][date.fromisoformat(str(dt))] = float(nav)
 
-    # Group by ticker
-    fund_cumulative = defaultdict(list)
-    for fund_id, dt, cum, shares in rows:
+    # Group cumulative data by (ticker, share_class, offering_type)
+    class_cumulative = defaultdict(list)
+    for fund_id, dt, share_class, offering_type, cum, shares in rows:
         ticker = fund_id_map.get(fund_id)
         if ticker:
-            fund_cumulative[ticker].append((
+            key = (ticker, fund_id, share_class, offering_type)
+            class_cumulative[key].append((
                 date.fromisoformat(str(dt)), float(cum), float(shares)
             ))
 
-    monthly_sales = _compute_monthly_deltas(fund_cumulative, fund_ticker_to_id, nav_by_fund)
+    # Compute monthly deltas per share class, then sum across classes per fund
+    monthly_sales = defaultdict(dict)
+    for (ticker, fund_id, share_class, offering_type), data_points in class_cumulative.items():
+        data_points.sort()
+        nav_lookup = nav_by_class.get((fund_id, share_class), {})
+        class_sales = _compute_class_monthly_deltas(data_points, nav_lookup)
+        for d, amount in class_sales.items():
+            monthly_sales[ticker][d] = monthly_sales[ticker].get(d, 0) + amount
+    monthly_sales = dict(monthly_sales)
 
     # Get total NAV for % of NAV
     nav_lookup = await get_total_nav_lookup()
