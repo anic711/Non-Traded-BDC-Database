@@ -34,22 +34,18 @@ async def get_redemption_requests_data(start: date, end: date, period: str = "mo
         """))
         rows = result.fetchall()
 
-        # Get last available NAV per share (prefer Class I) for conversions
+        # Get average NAV per share for computing value of shares tendered
         nav_result = await session.execute(text("""
-            SELECT fund_id, as_of_date, nav_per_share, share_class
+            SELECT fund_id, as_of_date, AVG(nav_per_share) as avg_nav
             FROM nav_per_share
             WHERE nav_per_share IS NOT NULL
-            ORDER BY fund_id, as_of_date,
-                CASE WHEN share_class = 'Class I' THEN 0 ELSE 1 END
+            GROUP BY fund_id, as_of_date
         """))
-        nav_rows = nav_result.fetchall()
+        avg_nav_rows = nav_result.fetchall()
 
-    # Build {fund_id: {date: nav}} using Class I when available
-    nav_by_fund = defaultdict(dict)
-    for fund_id, dt, nav, share_class in nav_rows:
-        d = date.fromisoformat(str(dt))
-        if d not in nav_by_fund[fund_id]:
-            nav_by_fund[fund_id][d] = float(nav)
+    avg_nav_by_fund = defaultdict(dict)
+    for fund_id, dt, avg_nav in avg_nav_rows:
+        avg_nav_by_fund[fund_id][date.fromisoformat(str(dt))] = float(avg_nav)
 
     shares_tendered = defaultdict(dict)
     value_tendered = defaultdict(dict)
@@ -64,25 +60,25 @@ async def get_redemption_requests_data(start: date, end: date, period: str = "mo
         qm = ((d.month - 1) // 3 + 1) * 3
         qe = date(d.year, qm, calendar.monthrange(d.year, qm)[1])
 
-        nav = _prior_value(nav_by_fund.get(fund_id, {}), d) or _closest_value(nav_by_fund.get(fund_id, {}), d)
+        avg_nav = _closest_value(avg_nav_by_fund.get(fund_id, {}), d)
 
         # Infer shares_redeemed from value_redeemed if not available
-        if redeemed is None and value_red is not None and nav:
-            redeemed = value_red / nav
+        if redeemed is None and value_red is not None and avg_nav:
+            redeemed = value_red / avg_nav
 
         # Infer shares_tendered from shares_redeemed if not available
         if tendered is None and redeemed is not None:
             tendered = redeemed
-        if tendered is None and value_red is not None and nav:
-            tendered = value_red / nav
+        if tendered is None and value_red is not None and avg_nav:
+            tendered = value_red / avg_nav
 
         if tendered is not None:
             t_val = float(tendered)
             shares_tendered[ticker][qe] = shares_tendered[ticker].get(qe, 0) + t_val
 
             # Compute value of shares tendered = shares_tendered × avg NAV
-            if nav:
-                value_tendered[ticker][qe] = value_tendered[ticker].get(qe, 0) + t_val * nav
+            if avg_nav:
+                value_tendered[ticker][qe] = value_tendered[ticker].get(qe, 0) + t_val * avg_nav
 
             # % fulfilled = shares_redeemed / shares_tendered
             if redeemed is not None and t_val > 0:

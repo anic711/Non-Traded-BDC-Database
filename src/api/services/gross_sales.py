@@ -89,22 +89,19 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
         """))
         rows = result.fetchall()
 
-        # NAV per share by (fund_id, as_of_date), prefer Class I
+        # Average NAV per share by (fund_id, as_of_date) across share classes
         nav_result = await session.execute(text("""
-            SELECT fund_id, as_of_date, nav_per_share, share_class
+            SELECT fund_id, as_of_date, AVG(nav_per_share) as avg_nav
             FROM nav_per_share
             WHERE nav_per_share IS NOT NULL
-            ORDER BY fund_id, as_of_date,
-                CASE WHEN share_class = 'Class I' THEN 0 ELSE 1 END
+            GROUP BY fund_id, as_of_date
         """))
         nav_rows = nav_result.fetchall()
 
-    # Build NAV lookup: {fund_id: {date: nav}} using Class I when available
+    # Build NAV lookup: {fund_id: {date: avg_nav}}
     nav_by_fund = defaultdict(dict)
-    for fund_id, dt, nav, share_class in nav_rows:
-        d = date.fromisoformat(str(dt))
-        if d not in nav_by_fund[fund_id]:
-            nav_by_fund[fund_id][d] = float(nav)
+    for fund_id, dt, avg_nav in nav_rows:
+        nav_by_fund[fund_id][date.fromisoformat(str(dt))] = float(avg_nav)
 
     # Group by ticker
     fund_cumulative = defaultdict(list)

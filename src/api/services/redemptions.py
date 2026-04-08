@@ -34,21 +34,18 @@ async def get_redemptions_data(start: date, end: date, period: str = "monthly") 
         """))
         rows = result.fetchall()
 
-        # NAV per share for inferring missing data (prefer Class I)
+        # Average NAV per share for inferring missing data
         nav_ps_result = await session.execute(text("""
-            SELECT fund_id, as_of_date, nav_per_share, share_class
+            SELECT fund_id, as_of_date, AVG(nav_per_share) as avg_nav
             FROM nav_per_share
             WHERE nav_per_share IS NOT NULL
-            ORDER BY fund_id, as_of_date,
-                CASE WHEN share_class = 'Class I' THEN 0 ELSE 1 END
+            GROUP BY fund_id, as_of_date
         """))
         nav_ps_rows = nav_ps_result.fetchall()
 
-    nav_ps_by_fund = defaultdict(dict)
-    for fund_id, dt, nav, share_class in nav_ps_rows:
-        d = date.fromisoformat(str(dt))
-        if d not in nav_ps_by_fund[fund_id]:
-            nav_ps_by_fund[fund_id][d] = float(nav)
+    avg_nav_by_fund = defaultdict(dict)
+    for fund_id, dt, avg_nav in nav_ps_rows:
+        avg_nav_by_fund[fund_id][date.fromisoformat(str(dt))] = float(avg_nav)
 
     shares_data = defaultdict(dict)  # {ticker: {date: value}}
     value_data = defaultdict(dict)
@@ -60,8 +57,8 @@ async def get_redemptions_data(start: date, end: date, period: str = "monthly") 
             qm = ((d.month - 1) // 3 + 1) * 3
             qe = date(d.year, qm, calendar.monthrange(d.year, qm)[1])
 
-            # Infer missing data using last available NAV per share
-            nav = _prior_value(nav_ps_by_fund.get(fund_id, {}), d) or _closest_value(nav_ps_by_fund.get(fund_id, {}), d)
+            # Infer missing data using avg NAV per share
+            nav = _closest_value(avg_nav_by_fund.get(fund_id, {}), d)
             if shares is None and value is not None and nav:
                 shares = value / nav
             elif value is None and shares is not None and nav:
