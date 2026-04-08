@@ -400,7 +400,34 @@ async def _store_parsed_data(fund_id: int, filing_id: int, parsed: ParsedFiling)
         # overwrite authoritative SC TO-I/A data
         for rec in parsed.redemption_records:
             if rec.source_form_type == "8-K":
-                # Only insert if no record exists yet; don't overwrite SC TO-I/A
+                # Check if an SC TO-I/A record already exists for this date
+                existing = await session.execute(
+                    text("""
+                        SELECT source_form_type, shares_tendered, shares_redeemed, value_redeemed
+                        FROM redemptions WHERE fund_id = :fid AND as_of_date = :dt
+                    """),
+                    {"fid": fund_id, "dt": str(rec.as_of_date)},
+                )
+                existing_row = existing.fetchone()
+
+                if existing_row and existing_row[0] != "8-K":
+                    # SC TO-I/A record exists — only fill in NULL fields
+                    updates = {}
+                    if existing_row[1] is None and rec.shares_tendered is not None:
+                        updates["shares_tendered"] = rec.shares_tendered
+                    if existing_row[2] is None and rec.shares_redeemed is not None:
+                        updates["shares_redeemed"] = rec.shares_redeemed
+                    if existing_row[3] is None and rec.value_redeemed is not None:
+                        updates["value_redeemed"] = rec.value_redeemed
+                    if updates:
+                        set_clauses = ", ".join(f"{k} = :{k}" for k in updates)
+                        await session.execute(
+                            text(f"UPDATE redemptions SET {set_clauses} WHERE fund_id = :fid AND as_of_date = :dt"),
+                            {"fid": fund_id, "dt": str(rec.as_of_date), **updates},
+                        )
+                    continue
+
+                # No record or existing 8-K record — upsert, filling in blanks
                 stmt = sqlite_insert(Redemption).values(
                     fund_id=fund_id,
                     filing_id=filing_id,
@@ -409,8 +436,14 @@ async def _store_parsed_data(fund_id: int, filing_id: int, parsed: ParsedFiling)
                     shares_redeemed=rec.shares_redeemed,
                     value_redeemed=rec.value_redeemed,
                     source_form_type=rec.source_form_type,
-                ).on_conflict_do_nothing(
+                ).on_conflict_do_update(
                     index_elements=["fund_id", "as_of_date"],
+                    set_=dict(
+                        filing_id=filing_id,
+                        shares_tendered=text("COALESCE(excluded.shares_tendered, redemptions.shares_tendered)"),
+                        shares_redeemed=text("COALESCE(excluded.shares_redeemed, redemptions.shares_redeemed)"),
+                        value_redeemed=text("COALESCE(excluded.value_redeemed, redemptions.value_redeemed)"),
+                    ),
                 )
             else:
                 # SC TO-I/A and other authoritative sources always overwrite
