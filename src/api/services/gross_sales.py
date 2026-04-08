@@ -153,25 +153,11 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
     yoy_data = {t: compute_yoy_growth(monthly_sales.get(t, {})) for t in tickers}
     total_yoy = compute_yoy_growth(total_sales)
 
-    # For 3M trailing, we need the original monthly data even in quarterly mode
+    # For 3M trailing Y/Y: in quarterly mode, a quarter IS the 3-month window,
+    # so trailing 3M Y/Y equals regular Y/Y — reuse it directly.
     if period == "quarterly":
-        monthly_raw = _compute_monthly_deltas(fund_cumulative, fund_ticker_to_id, nav_by_fund)
-        # Fill N/A on monthly raw data so trailing windows see gaps
-        raw_dates = sorted(set().union(*(monthly_raw.get(t, {}).keys() for t in tickers)))
-        for t in tickers:
-            if t in monthly_raw:
-                monthly_raw[t] = fill_na_after_start(monthly_raw[t], raw_dates)
-        total_raw = compute_total_with_na(monthly_raw, tickers, raw_dates)
-        trailing_data = {t: compute_trailing_3m_yoy(monthly_raw.get(t, {})) for t in tickers}
-        total_trailing = compute_trailing_3m_yoy(total_raw)
-        # Map to quarter-end dates
-        for t in tickers:
-            quarterly_trailing = {}
-            for d, v in trailing_data[t].items():
-                if d in dates:
-                    quarterly_trailing[d] = v
-            trailing_data[t] = quarterly_trailing
-        total_trailing = {d: v for d, v in total_trailing.items() if d in dates}
+        trailing_data = yoy_data
+        total_trailing = total_yoy
     else:
         trailing_data = {t: compute_trailing_3m_yoy(monthly_sales.get(t, {})) for t in tickers}
         total_trailing = compute_trailing_3m_yoy(total_sales)
