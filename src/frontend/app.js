@@ -29,6 +29,8 @@ function init() {
             btn.classList.add('active');
             state.activeTab = btn.dataset.tab;
             updatePeriodToggle();
+            const defaultYears = TAB_DEFAULT_YEARS[state.activeTab] || 1;
+            setDatePreset(defaultYears);
             fetchData();
         });
     });
@@ -102,6 +104,13 @@ function clearPresetHighlight() {
 
 // Tabs where data is always quarterly (no period toggle)
 const QUARTERLY_ONLY_TABS = ['redemptions', 'redemption-requests', 'net-flows'];
+
+// Default date range per tab
+const TAB_DEFAULT_YEARS = {
+    'redemptions': 2,
+    'redemption-requests': 2,
+    'net-flows': 2,
+};
 
 function updatePeriodToggle() {
     const toggle = document.getElementById('period-toggle');
