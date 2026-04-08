@@ -56,7 +56,7 @@ def compute_total_with_na(fund_data: dict, tickers: list, dates) -> dict:
                 has_any = True
         if has_na:
             result[d] = NA
-        elif has_any and total > 0:
+        elif has_any:
             result[d] = total
     return result
 
