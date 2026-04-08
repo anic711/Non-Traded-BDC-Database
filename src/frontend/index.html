@@ -5,33 +5,79 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Non-Traded BDC Metrics</title>
     <link rel="icon" href="data:,">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <header>
-        <h1>Non-Traded BDC Metrics Dashboard</h1>
-        <div class="controls">
-            <div class="tabs">
-                <button class="tab active" data-tab="gross-sales">Gross Sales</button>
-                <button class="tab" data-tab="redemptions">Redemptions</button>
-                <button class="tab" data-tab="performance">Performance</button>
-                <button class="tab" data-tab="redemption-requests">Redemption Requests</button>
-            </div>
-            <div class="filters">
-                <label>Start: <input type="month" id="start-date"></label>
-                <label>End: <input type="month" id="end-date"></label>
+    <nav class="sidebar">
+        <div class="sidebar-brand">BDC Metrics</div>
+        <div class="sidebar-tabs">
+            <button class="tab active" data-tab="gross-sales">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 14V6l4-4 4 4v8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 14V8l4-4v10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Gross Sales
+            </button>
+            <button class="tab" data-tab="redemptions">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M5 10l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 6h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                Redemptions
+            </button>
+            <button class="tab" data-tab="performance">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 12l4-5 3 3 5-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Performance
+            </button>
+            <button class="tab" data-tab="redemption-requests">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4h8M4 8h8M4 12h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                Redemption Requests
+            </button>
+        </div>
+    </nav>
+
+    <div class="main-area">
+        <header class="toolbar">
+            <div class="toolbar-left">
+                <div class="date-controls">
+                    <div class="date-field">
+                        <label for="start-date">From</label>
+                        <input type="month" id="start-date">
+                    </div>
+                    <div class="date-field">
+                        <label for="end-date">To</label>
+                        <input type="month" id="end-date">
+                    </div>
+                    <div class="preset-buttons">
+                        <button class="preset-btn" data-years="1">1Y</button>
+                        <button class="preset-btn active" data-years="2">2Y</button>
+                        <button class="preset-btn" data-years="3">3Y</button>
+                    </div>
+                </div>
                 <div class="period-toggle" id="period-toggle">
                     <button class="period-btn active" data-period="monthly">Monthly</button>
                     <button class="period-btn" data-period="quarterly">Quarterly</button>
                 </div>
-                <button id="refresh-btn" class="refresh-btn">Refresh Data</button>
             </div>
-        </div>
-    </header>
-    <main>
-        <div id="loading" class="loading" style="display:none;">Loading...</div>
-        <div id="grid-container"></div>
-    </main>
+            <div class="toolbar-right">
+                <button id="export-btn" class="action-btn export-btn" title="Export to Excel">
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Export
+                </button>
+                <button id="refresh-btn" class="action-btn refresh-btn" title="Refresh data from SEC EDGAR">
+                    <span class="status-light" id="status-light"></span>
+                    <svg class="refresh-icon" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 0110.47-4M14 2v4h-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 8a6 6 0 01-10.47 4M2 14v-4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Refresh
+                </button>
+            </div>
+        </header>
+
+        <main>
+            <div id="loading" class="loading" style="display:none;">
+                <div class="loading-spinner"></div>
+                <span>Loading data...</span>
+            </div>
+            <div id="grid-container"></div>
+        </main>
+    </div>
+
     <script src="/static/app.js"></script>
 </body>
 </html>

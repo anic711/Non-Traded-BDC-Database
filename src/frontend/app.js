@@ -6,6 +6,7 @@ const state = {
     start: null,
     end: null,
     data: null,
+    presetYears: 2,
 };
 
 const ENDPOINTS = {
@@ -18,16 +19,7 @@ const ENDPOINTS = {
 // --- Initialization ---
 
 function init() {
-    // Set default dates: last 12 months
-    const now = new Date();
-    const endMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const startDate = new Date(now.getFullYear() - 1, now.getMonth(), 1);
-    const startMonth = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
-
-    document.getElementById('start-date').value = startMonth;
-    document.getElementById('end-date').value = endMonth;
-    state.start = startMonth;
-    state.end = endMonth;
+    setDatePreset(2);
 
     // Tab listeners
     document.querySelectorAll('.tab').forEach(btn => {
@@ -53,17 +45,58 @@ function init() {
     // Date inputs
     document.getElementById('start-date').addEventListener('change', e => {
         state.start = e.target.value;
+        clearPresetHighlight();
         fetchData();
     });
     document.getElementById('end-date').addEventListener('change', e => {
         state.end = e.target.value;
+        clearPresetHighlight();
         fetchData();
+    });
+
+    // Preset buttons (1Y, 2Y, 3Y)
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const years = parseInt(btn.dataset.years);
+            setDatePreset(years);
+            fetchData();
+        });
     });
 
     // Refresh button
     document.getElementById('refresh-btn').addEventListener('click', refreshData);
 
+    // Export button
+    document.getElementById('export-btn').addEventListener('click', exportXlsx);
+
+    // Check update status on load
+    checkUpdateStatus();
+
     fetchData();
+}
+
+// --- Date Presets ---
+
+function setDatePreset(years) {
+    state.presetYears = years;
+    const now = new Date();
+    const endMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const startDate = new Date(now.getFullYear() - years, now.getMonth(), 1);
+    const startMonth = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
+
+    document.getElementById('start-date').value = startMonth;
+    document.getElementById('end-date').value = endMonth;
+    state.start = startMonth;
+    state.end = endMonth;
+
+    document.querySelectorAll('.preset-btn').forEach(b => {
+        b.classList.toggle('active', parseInt(b.dataset.years) === years);
+    });
+}
+
+function clearPresetHighlight() {
+    state.presetYears = null;
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
 }
 
 // Tabs where data is always quarterly (no period toggle)
@@ -78,28 +111,107 @@ function updatePeriodToggle() {
     }
 }
 
+// --- Update Status ---
+
+async function checkUpdateStatus() {
+    const light = document.getElementById('status-light');
+    try {
+        const resp = await fetch('/api/update/latest');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data) return;
+        if (data.status === 'running') {
+            light.className = 'status-light running';
+            light.title = 'Update in progress...';
+            // Poll until complete
+            setTimeout(checkUpdateStatus, 5000);
+        } else if (data.status === 'success' || data.status === 'completed') {
+            light.className = 'status-light ok';
+            const ts = data.completed_at || data.started_at;
+            light.title = ts ? `Last updated: ${new Date(ts).toLocaleString()}` : 'Up to date';
+        } else if (data.status === 'error' || data.status === 'failed') {
+            light.className = 'status-light error';
+            light.title = 'Last update failed';
+        } else {
+            light.className = 'status-light ok';
+            light.title = 'Status: ' + data.status;
+        }
+    } catch {
+        // Ignore errors — status light stays gray
+    }
+}
+
 // --- Data Refresh ---
 
 async function refreshData() {
     const btn = document.getElementById('refresh-btn');
+    const light = document.getElementById('status-light');
     btn.disabled = true;
-    btn.textContent = 'Refreshing...';
+    btn.classList.add('spinning');
+    light.className = 'status-light running';
+
     try {
         const resp = await fetch('/api/update/trigger', { method: 'POST' });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const result = await resp.json();
-        btn.textContent = 'Done!';
-        setTimeout(() => {
-            btn.textContent = 'Refresh Data';
-            btn.disabled = false;
-            fetchData();
-        }, 2000);
+        // Poll for completion
+        pollRefreshStatus(btn);
     } catch (err) {
-        btn.textContent = 'Error';
-        setTimeout(() => {
-            btn.textContent = 'Refresh Data';
-            btn.disabled = false;
-        }, 3000);
+        light.className = 'status-light error';
+        light.title = 'Refresh failed';
+        btn.classList.remove('spinning');
+        btn.disabled = false;
+    }
+}
+
+async function pollRefreshStatus(btn) {
+    try {
+        const resp = await fetch('/api/update/latest');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data && (data.status === 'running' || data.status === 'started')) {
+                setTimeout(() => pollRefreshStatus(btn), 3000);
+                return;
+            }
+        }
+    } catch { /* ignore */ }
+
+    // Done (success or failure) — refresh data
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+    checkUpdateStatus();
+    fetchData();
+}
+
+// --- XLSX Export ---
+
+async function exportXlsx() {
+    const btn = document.getElementById('export-btn');
+    btn.disabled = true;
+    const origText = btn.innerHTML;
+
+    try {
+        const url = new URL('/api/dashboard/export', window.location.origin);
+        if (state.start) url.searchParams.set('start', state.start);
+        if (state.end) url.searchParams.set('end', state.end);
+        url.searchParams.set('period', state.period);
+
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const blob = await resp.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        const cd = resp.headers.get('content-disposition');
+        a.download = cd ? cd.split('filename=')[1].replace(/"/g, '') : 'bdc_metrics.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+    } catch (err) {
+        console.error('Export failed:', err);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
     }
 }
 
@@ -108,7 +220,7 @@ async function refreshData() {
 async function fetchData() {
     const loading = document.getElementById('loading');
     const container = document.getElementById('grid-container');
-    loading.style.display = 'block';
+    loading.style.display = 'flex';
     container.innerHTML = '';
 
     const url = new URL(ENDPOINTS[state.activeTab], window.location.origin);
@@ -149,7 +261,7 @@ function renderGrid() {
         if (bank.subtitle) {
             const sub = document.createElement('span');
             sub.className = 'bank-subtitle';
-            sub.textContent = ' ' + bank.subtitle;
+            sub.textContent = '\u2014 ' + bank.subtitle;
             header.appendChild(sub);
         }
         section.appendChild(header);
@@ -252,7 +364,6 @@ function formatNumber(val) {
     if (Math.abs(val) >= 1e3) return addCommas((val / 1e3).toFixed(0)) + 'K';
     return addCommas(val.toFixed(0));
 }
-
 
 function formatDateLabel(dateStr) {
     // "2025-03-31" -> "Mar 2025"
