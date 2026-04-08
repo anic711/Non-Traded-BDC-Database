@@ -79,6 +79,37 @@ if os.path.exists(db):
     conn.close()
 " 2>/dev/null || true
 
+# One-time fix: reparse ALL SC TO-I/A filings to populate shares_tendered
+# The parser now distinguishes "shares accepted" from "total tender requests"
+python -c "
+import sqlite3, os
+db = os.environ.get('DATABASE_URL_SYNC','').replace('sqlite:///','')
+if os.path.exists(db):
+    conn = sqlite3.connect(db)
+    # Check if any SC TO-I/A redemption is missing shares_tendered (new field)
+    missing = conn.execute('''
+        SELECT COUNT(*)
+        FROM redemptions r
+        JOIN filings f ON r.filing_id = f.id
+        WHERE f.form_type LIKE \"SC TO-I%\"
+          AND r.shares_tendered IS NULL
+          AND r.shares_redeemed IS NOT NULL
+    ''').fetchone()[0]
+    if missing > 0:
+        print(f'Found {missing} SC TO-I/A redemptions missing shares_tendered, resetting for reparse')
+        fids = conn.execute('''
+            SELECT DISTINCT f.id
+            FROM filings f
+            WHERE f.form_type LIKE \"SC TO-I%\"
+        ''').fetchall()
+        for (fid,) in fids:
+            conn.execute('DELETE FROM redemptions WHERE filing_id=?', (fid,))
+            conn.execute('UPDATE filings SET parse_status=\"pending\", parsed_at=NULL WHERE id=?', (fid,))
+        conn.commit()
+        print(f'Reset {len(fids)} SC TO-I/A filings for reparse')
+    conn.close()
+" 2>/dev/null || true
+
 # One-time fix: reparse SC TO-I/A filings with wrong as_of dates
 # The parser now extracts offer expiration date snapped to quarter-end.
 python -c "
@@ -155,6 +186,30 @@ async def reparse():
             print(f'  Reparsed filing {fid} ({form_type}): skipped')
 
 asyncio.run(reparse())
+" 2>/dev/null || true
+
+# Re-run 8-K exhibit backfill to pick up pct_tendered → shares_tendered conversion
+python -c "
+import asyncio, os
+db = os.environ.get('DATABASE_URL_SYNC','').replace('sqlite:///','')
+if not os.path.exists(db):
+    exit(0)
+
+import sqlite3
+conn = sqlite3.connect(db)
+# Only run if there are 8-K redemptions missing shares_tendered
+missing = conn.execute('''
+    SELECT COUNT(*) FROM redemptions
+    WHERE source_form_type = \"8-K\" AND shares_tendered IS NULL AND value_redeemed IS NOT NULL
+''').fetchone()[0]
+conn.close()
+
+if missing == 0:
+    exit(0)
+
+print(f'Re-running 8-K exhibit backfill for {missing} records missing shares_tendered...')
+from src.collectors.pipeline import backfill_8k_exhibit_redemptions
+asyncio.run(backfill_8k_exhibit_redemptions())
 " 2>/dev/null || true
 
 echo "Starting server on port ${PORT:-8000}..."

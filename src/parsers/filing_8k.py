@@ -626,6 +626,7 @@ def parse_8k_exhibit_for_redemptions(
         shares_redeemed=shares_redeemed,
         value_redeemed=value_redeemed,
         source_form_type="8-K",
+        pct_tendered_of_os=pct_tendered,
     )]
 
 

@@ -379,6 +379,23 @@ async def _store_parsed_data(fund_id: int, filing_id: int, parsed: ParsedFiling)
             )
             await session.execute(stmt)
 
+        # Resolve pct_tendered_of_os → shares_tendered using shares outstanding
+        for rec in parsed.redemption_records:
+            if rec.pct_tendered_of_os is not None and rec.shares_tendered is None:
+                so_row = await session.execute(
+                    text("""
+                        SELECT total_shares_outstanding FROM shares_outstanding
+                        WHERE fund_id = :fid AND as_of_date <= :dt
+                        ORDER BY as_of_date DESC LIMIT 1
+                    """),
+                    {"fid": fund_id, "dt": str(rec.as_of_date)},
+                )
+                so = so_row.scalar()
+                if so:
+                    rec.shares_tendered = (
+                        rec.pct_tendered_of_os / Decimal("100") * Decimal(str(so))
+                    ).quantize(Decimal("1"))
+
         # Redemption records — 8-K data is preliminary and should not
         # overwrite authoritative SC TO-I/A data
         for rec in parsed.redemption_records:

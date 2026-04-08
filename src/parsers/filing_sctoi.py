@@ -174,8 +174,11 @@ def _parse_from_text(text: str, as_of: date) -> RedemptionRecord | None:
     shares_tendered = None
     value_redeemed = None
 
-    # --- Shares tendered ---
-    # Pattern: "X Shares were validly tendered and not withdrawn"
+    # --- "Validly tendered and not withdrawn" ---
+    # In SC TO-I/A filings, this phrase reports the shares that were ACCEPTED
+    # for purchase (after any proration), not necessarily total requests.
+    # We call this 'validly_tendered' and use it for shares_redeemed.
+    validly_tendered = None
     tendered_patterns = [
         r"([\d,]+(?:\.\d+)?)\s+[Ss]hares?\s+(?:of\s+the\s+(?:Fund|Company)\s+)?were\s+(?:validly\s+)?tendered\s+and\s+not\s+withdrawn",
         r"([\d,]+(?:\.\d+)?)\s+shares?\s+were\s+(?:validly\s+)?tendered",
@@ -185,11 +188,11 @@ def _parse_from_text(text: str, as_of: date) -> RedemptionRecord | None:
         if match:
             val = clean_numeric(match.group(1))
             if val is not None and val > 0:
-                shares_tendered = val
+                validly_tendered = val
                 break
 
     # Per-class tendered: "X Class S Shares, Y Class D Shares ... were validly tendered"
-    if shares_tendered is None:
+    if validly_tendered is None:
         tendered_ctx = re.search(
             r"([\d,]+\s+Class\s+[A-Z][\w\s,]+?Shares?(?:\s*,?\s*(?:and\s+)?[\d,]+\s+Class\s+[A-Z][\w\s]*?Shares?)*)\s+were\s+(?:validly\s+)?tendered",
             text, re.IGNORECASE,
@@ -202,24 +205,37 @@ def _parse_from_text(text: str, as_of: date) -> RedemptionRecord | None:
                 if val is not None and val > 0:
                     total += val
             if total > 0:
-                shares_tendered = total
+                validly_tendered = total
 
     # --- Shares redeemed/accepted ---
-    # First check: if "accepted for purchase 100%", shares_redeemed = shares_tendered
-    if shares_tendered is not None and re.search(
+    # Check if filing explicitly states a different accepted amount (pro rata)
+    accepted_match = re.search(
+        r"accepted\s+for\s+purchase\s+([\d,]+(?:\.\d+)?)\s+[Ss]hares",
+        text, re.IGNORECASE,
+    )
+    if accepted_match:
+        val = clean_numeric(accepted_match.group(1))
+        if val is not None and val > 0:
+            shares_redeemed = val
+            # When accepted < validly_tendered, the validly_tendered IS the
+            # actual total requests (pro rata scenario, e.g. ASIF)
+            if validly_tendered is not None and validly_tendered > val:
+                shares_tendered = validly_tendered
+
+    # If "accepted for purchase 100%", redeemed = validly_tendered
+    if shares_redeemed is None and validly_tendered is not None and re.search(
         r"accepted\s+for\s+(?:purchase|payment)\s+100%", text, re.IGNORECASE,
     ):
-        shares_redeemed = shares_tendered
-    # Also: "purchased all validly tendered" means 100%
-    elif shares_tendered is not None and re.search(
+        shares_redeemed = validly_tendered
+    # "purchased all validly tendered" means 100%
+    elif shares_redeemed is None and validly_tendered is not None and re.search(
         r"purchased\s+all\s+(?:validly\s+)?tendered", text, re.IGNORECASE,
     ):
-        shares_redeemed = shares_tendered
+        shares_redeemed = validly_tendered
 
-    # Pattern: "X shares were accepted for purchase" or similar
+    # Other patterns for shares accepted/redeemed
     if shares_redeemed is None:
         shares_patterns = [
-            r"accepted\s+for\s+purchase\s+([\d,]+(?:\.\d+)?)\s+[Ss]hares",
             r"([\d,]+(?:\.\d+)?)\s+[Ss]hares?\s+(?:of\s+the\s+(?:Fund|Company)\s+)?were\s+(?:validly\s+)?(?:accepted|repurchased|purchased)",
             r"(?:accepted|repurchased|purchased)\s+([\d,]+(?:\.\d+)?)\s+[Ss]hares",
             r"repurchased\s+(?:a\s+total\s+of\s+)?([\d,]+(?:\.\d+)?)\s+[Ss]hares",
@@ -238,7 +254,6 @@ def _parse_from_text(text: str, as_of: date) -> RedemptionRecord | None:
             r"([\d,]+(?:\.\d+)?)\s+Class\s+[A-Z]\s+(?:Common\s+)?Shares?",
             text, re.IGNORECASE,
         )
-        # Only sum if the match context involves accepting/repurchasing (not just tendering)
         if per_class and re.search(
             r"Class\s+[A-Z]\s+(?:Common\s+)?Shares?\s+were\s+(?:validly\s+)?(?:accepted|repurchased|purchased)",
             text, re.IGNORECASE,
@@ -251,7 +266,16 @@ def _parse_from_text(text: str, as_of: date) -> RedemptionRecord | None:
             if total > 0:
                 shares_redeemed = total
 
-    # Pattern: "aggregate consideration of/was/paid $X" or "total purchase price of $X"
+    # Default: if validly_tendered found but shares_redeemed still not, use it
+    if shares_redeemed is None and validly_tendered is not None:
+        has_partial = bool(re.search(
+            r"pro\s+rata|representing\s+\d+(?:\.\d+)?%\s+of\s+the\s+(?:Shares|shares)",
+            text, re.IGNORECASE,
+        ))
+        if not has_partial:
+            shares_redeemed = validly_tendered
+
+    # --- Value redeemed ---
     value_patterns = [
         r"total\s+of\s+\$\s*([\d,]+(?:\.\d+)?)\s*,?\s*representing\s+(?:\d+%\s+of\s+)?the\s+net\s+asset\s+value",
         r"net\s+asset\s+value\s+of\s+[Ss]hares?\s+tendered.{0,120}?(?:amount\s+of\s+)?\$\s*([\d,]+(?:\.\d+)?)",
@@ -276,7 +300,7 @@ def _parse_from_text(text: str, as_of: date) -> RedemptionRecord | None:
     # When filing says "fulfilling all requests" / "100% of requests" with
     # "purchase up to X shares" and an upsize, compute actual from percentages.
     # The "up to X shares" is the ORIGINAL offer (e.g. 5%), not the actual amount.
-    if shares_redeemed is None and shares_tendered is None:
+    if shares_redeemed is None and validly_tendered is None:
         full_fulfillment = bool(re.search(
             r"fulfilling\s+(?:all\s+)?(?:repurchase|tender)?\s*requests"
             r"|meet\s+100%\s+of\s+(?:repurchase|tender)?\s*requests",
@@ -290,12 +314,9 @@ def _parse_from_text(text: str, as_of: date) -> RedemptionRecord | None:
             if cap_match:
                 original_cap = clean_numeric(cap_match.group(1))
                 if original_cap is not None and original_cap > 0:
-                    # Determine the original offer % (usually 5%)
-                    # and the total fulfillment % (upsize + any offsets)
                     original_pct = Decimal("5")  # default 5%
                     total_pct = original_pct
 
-                    # "upsize the offer to X% of shares"
                     upsize = re.search(
                         r"upsize\s+the\s+offer\s+to\s+([\d.]+)%",
                         text, re.IGNORECASE,
@@ -303,12 +324,8 @@ def _parse_from_text(text: str, as_of: date) -> RedemptionRecord | None:
                     if upsize:
                         total_pct = Decimal(upsize.group(1))
 
-                    # The upsize % is the actual shares repurchased by the fund.
                     redeemed_pct = total_pct
 
-                    # Additional % from employee/firm investments offsetting redemptions.
-                    # This offset enabled the fund to fulfill requests beyond the upsize
-                    # cap — it counts toward shares tendered but not shares redeemed.
                     offset_pct = Decimal("0")
                     offset = re.search(
                         r"(?:approximately|representing)\s+([\d.]+)%\s+of\s+\w+(?:['\u2019]s)?\s+shares\s+outstanding",
@@ -317,23 +334,55 @@ def _parse_from_text(text: str, as_of: date) -> RedemptionRecord | None:
                     if offset:
                         offset_pct = Decimal(offset.group(1))
 
-                    # Compute shares outstanding from original cap and original %
                     shares_outstanding = original_cap / (original_pct / Decimal("100"))
                     tendered_pct = redeemed_pct + offset_pct
                     shares_tendered = ((tendered_pct / Decimal("100")) * shares_outstanding).quantize(Decimal("1"))
                     shares_redeemed = ((redeemed_pct / Decimal("100")) * shares_outstanding).quantize(Decimal("1"))
 
-    # Default: if shares_tendered known but shares_redeemed still not found,
-    # and no mention of pro rata / partial acceptance, assume all tendered = redeemed.
-    # "representing X% of the net asset value" is a fee deduction, not partial acceptance.
-    # Only block the default if there's pro rata language about *shares* acceptance.
-    if shares_redeemed is None and shares_tendered is not None:
-        has_partial = bool(re.search(
-            r"pro\s+rata|representing\s+\d+(?:\.\d+)?%\s+of\s+the\s+(?:Shares|shares)",
+    # --- Total tender requests (actual investor demand) ---
+    # This captures the total repurchase requests submitted, which may be much
+    # higher than what was accepted. Look for explicit request % of shares O/S.
+    if shares_tendered is None:
+        request_pct_match = re.search(
+            r"(?:requests?\s+to\s+(?:repurchase|redeem|tender)\s+(?:approximately\s+)?([\d.]+)%)"
+            r"|(?:(?:repurchase|redemption|tender)\s+requests?\s+(?:of|for|totaling)\s+(?:approximately\s+)?([\d.]+)%)"
+            r"|(?:(?:repurchase|redemption|tender)\s+requests?\s+(?:exceeded|were)\s+(?:approximately\s+)?([\d.]+)%)",
             text, re.IGNORECASE,
-        ))
-        if not has_partial:
-            shares_redeemed = shares_tendered
+        )
+        if request_pct_match:
+            pct_str = next(g for g in request_pct_match.groups() if g is not None)
+            request_pct = Decimal(pct_str) / Decimal("100")
+            # Derive shares outstanding from the offer cap if available
+            cap_match = re.search(
+                r"purchase\s+up\s+to\s+([\d,]+(?:\.\d+)?)\s+(?:of\s+its\s+)?(?:outstanding\s+)?shares",
+                text, re.IGNORECASE,
+            )
+            if cap_match:
+                original_cap = clean_numeric(cap_match.group(1))
+                if original_cap is not None and original_cap > 0:
+                    shares_os = original_cap / Decimal("0.05")  # 5% offer
+                    shares_tendered = (request_pct * shares_os).quantize(Decimal("1"))
+
+        # Fulfillment rate: "approximately X% of their requested capital"
+        if shares_tendered is None:
+            fulfill_match = re.search(
+                r"(?:approximately|roughly|about|estimated?)\s+([\d.]+)%\s+of\s+their\s+requested\s+capital",
+                text, re.IGNORECASE,
+            )
+            if fulfill_match and (shares_redeemed is not None or value_redeemed is not None):
+                fulfill_pct = Decimal(fulfill_match.group(1)) / Decimal("100")
+                if fulfill_pct > 0:
+                    if shares_redeemed is not None:
+                        shares_tendered = (shares_redeemed / fulfill_pct).quantize(Decimal("1"))
+                    elif value_redeemed is not None:
+                        # We'll store this and let the service layer infer shares
+                        pass
+
+    # For 100% acceptance with no exceeded/upsize language, tendered = redeemed
+    if shares_tendered is None and shares_redeemed is not None:
+        exceeded = bool(re.search(r"exceed", text, re.IGNORECASE))
+        if not exceeded:
+            shares_tendered = shares_redeemed
 
     if shares_redeemed is not None or value_redeemed is not None or shares_tendered is not None:
         return RedemptionRecord(

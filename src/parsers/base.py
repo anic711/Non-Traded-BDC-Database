@@ -35,6 +35,7 @@ class RedemptionRecord:
     value_redeemed: Decimal | None
     source_form_type: str
     shares_tendered: Decimal | None = None
+    pct_tendered_of_os: Decimal | None = None  # % of shares O/S tendered (e.g. 11.2)
 
 
 @dataclass
