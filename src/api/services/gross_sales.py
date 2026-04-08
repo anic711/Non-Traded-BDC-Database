@@ -121,10 +121,16 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
         if fid in fund_id_map
     }
 
-    # Collect all dates that have data, filter to requested range
+    # Collect all monthly dates and fill N/A after each fund's series starts.
+    # This must happen BEFORE quarterly aggregation so that a quarter with
+    # any N/A month is itself marked N/A.
     all_data_dates = set()
     for sales in monthly_sales.values():
         all_data_dates.update(sales.keys())
+    all_monthly_sorted = sorted(all_data_dates)
+    for ticker in tickers:
+        if ticker in monthly_sales:
+            monthly_sales[ticker] = fill_na_after_start(monthly_sales[ticker], all_monthly_sorted)
 
     if period == "quarterly":
         for ticker in tickers:
@@ -135,11 +141,7 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
         for sales in monthly_sales.values():
             all_data_dates.update(sales.keys())
 
-    # Fill N/A for dates after each fund's series starts
     all_dates_sorted = sorted(all_data_dates)
-    for ticker in tickers:
-        if ticker in monthly_sales:
-            monthly_sales[ticker] = fill_na_after_start(monthly_sales[ticker], all_dates_sorted)
 
     dates = sorted(d for d in all_data_dates if start <= d <= end)
 
@@ -154,11 +156,14 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
     # For 3M trailing, we need the original monthly data even in quarterly mode
     if period == "quarterly":
         monthly_raw = _compute_monthly_deltas(fund_cumulative, fund_ticker_to_id, nav_by_fund)
+        # Fill N/A on monthly raw data so trailing windows see gaps
+        raw_dates = sorted(set().union(*(monthly_raw.get(t, {}).keys() for t in tickers)))
+        for t in tickers:
+            if t in monthly_raw:
+                monthly_raw[t] = fill_na_after_start(monthly_raw[t], raw_dates)
+        total_raw = compute_total_with_na(monthly_raw, tickers, raw_dates)
         trailing_data = {t: compute_trailing_3m_yoy(monthly_raw.get(t, {})) for t in tickers}
-        total_trailing = compute_trailing_3m_yoy(
-            {d: sum(monthly_raw.get(t, {}).get(d, 0) or 0 for t in tickers)
-             for d in sorted(set().union(*(monthly_raw.get(t, {}).keys() for t in tickers)))}
-        )
+        total_trailing = compute_trailing_3m_yoy(total_raw)
         # Map to quarter-end dates
         for t in tickers:
             quarterly_trailing = {}

@@ -128,6 +128,20 @@ async def get_performance_data(start: date, end: date, period: str = "monthly") 
         price_return[ticker] = pr
         income_return[ticker] = ir
 
+    # Fill N/A on monthly data BEFORE quarterly compounding so that a quarter
+    # with any missing month is marked N/A.
+    all_monthly = set()
+    for p in total_return.values():
+        all_monthly.update(p.keys())
+    all_monthly_sorted = sorted(all_monthly)
+    for ticker in tickers:
+        if ticker in total_return:
+            total_return[ticker] = fill_na_after_start(total_return[ticker], all_monthly_sorted, any_value=True)
+        if ticker in price_return:
+            price_return[ticker] = fill_na_after_start(price_return[ticker], all_monthly_sorted, any_value=True)
+        if ticker in income_return:
+            income_return[ticker] = fill_na_after_start(income_return[ticker], all_monthly_sorted, any_value=True)
+
     # For quarterly: compound monthly returns within each quarter
     if period == "quarterly":
         for ticker in tickers:
@@ -139,15 +153,6 @@ async def get_performance_data(start: date, end: date, period: str = "monthly") 
     for p in total_return.values():
         all_dates.update(p.keys())
     all_dates_sorted = sorted(all_dates)
-
-    # Fill N/A after each fund's series starts (use any_value since returns can be negative)
-    for ticker in tickers:
-        if ticker in total_return:
-            total_return[ticker] = fill_na_after_start(total_return[ticker], all_dates_sorted, any_value=True)
-        if ticker in price_return:
-            price_return[ticker] = fill_na_after_start(price_return[ticker], all_dates_sorted, any_value=True)
-        if ticker in income_return:
-            income_return[ticker] = fill_na_after_start(income_return[ticker], all_dates_sorted, any_value=True)
 
     dates = sorted(d for d in all_dates if start <= d <= end)
 
