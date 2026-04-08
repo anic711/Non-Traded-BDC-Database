@@ -150,9 +150,9 @@ def compute_yoy_growth(values: dict[date, float | None]) -> dict[date, float | N
             elif prior_val is not None and prior_val != 0:
                 result[d] = (val - prior_val) / abs(prior_val)
             else:
-                result[d] = None
+                result[d] = NA
         else:
-            result[d] = None
+            result[d] = NA
     return result
 
 
@@ -189,7 +189,7 @@ def compute_trailing_3m_yoy(monthly_values: dict[date, float | None]) -> dict[da
                 prior_idx = j
                 break
         if prior_idx is None:
-            result[d] = None
+            result[d] = NA
             continue
 
         prior_window = [sorted_dates[j] for j in range(max(0, prior_idx - 2), prior_idx + 1)]
@@ -198,7 +198,7 @@ def compute_trailing_3m_yoy(monthly_values: dict[date, float | None]) -> dict[da
             continue
         prior_sum = sum(monthly_values[w] for w in prior_window if monthly_values[w] is not None)
         if not any(monthly_values[w] is not None for w in prior_window) or prior_sum == 0:
-            result[d] = None
+            result[d] = NA
             continue
 
         result[d] = (current_sum - prior_sum) / abs(prior_sum)
