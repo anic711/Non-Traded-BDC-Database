@@ -32,21 +32,18 @@ def _compute_class_monthly_deltas(data_points, nav_lookup):
         d, cum, shares = data_points[i]
         d_prev, cum_prev, shares_prev = data_points[i - 1]
         delta_consideration = cum - cum_prev
-        if delta_consideration < 0:
-            continue
 
+        # Allow negative deltas through — at the fund level they offset matching
+        # positives in sibling buckets (e.g., share class consolidation, late
+        # restatements). Dropping them would silently overstate gross sales.
         sale_amount = None
         if _is_rounded(cum) and _is_rounded(cum_prev):
             delta_shares = shares - shares_prev
-            if delta_shares > 0:
-                prior_nav = _closest_value(nav_lookup, d_prev)
-                if prior_nav:
-                    sale_amount = delta_shares * prior_nav
-        if sale_amount is None and delta_consideration >= 0:
-            sale_amount = delta_consideration
-
+            prior_nav = _closest_value(nav_lookup, d_prev)
+            if prior_nav:
+                sale_amount = delta_shares * prior_nav
         if sale_amount is None:
-            continue
+            sale_amount = delta_consideration
 
         # If data points span multiple months, split evenly
         months_gap = (d.year - d_prev.year) * 12 + (d.month - d_prev.month)
@@ -100,19 +97,30 @@ async def get_gross_sales_data(start: date, end: date, period: str = "monthly") 
     for fund_id, dt, share_class, nav in nav_rows:
         nav_by_class[(fund_id, share_class)][date.fromisoformat(str(dt))] = float(nav)
 
-    # Group cumulative data by (ticker, share_class, offering_type)
-    class_cumulative = defaultdict(list)
+    # Aggregate cumulative consideration and shares across offering_type within
+    # each (ticker, share_class) before computing deltas. Reclassifications
+    # between Primary and Private Offering (seen e.g. for ADS in May 2026, where
+    # ~$200M of Class I shifted between buckets) would otherwise produce a
+    # negative delta in one stream — silently dropped by the
+    # `delta_consideration < 0` skip in `_compute_class_monthly_deltas` — paired
+    # with a matching positive delta in another, wildly overstating sales.
+    agg: dict = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0]))
     for fund_id, dt, share_class, offering_type, cum, shares in rows:
         ticker = fund_id_map.get(fund_id)
-        if ticker:
-            key = (ticker, fund_id, share_class, offering_type)
-            class_cumulative[key].append((
-                date.fromisoformat(str(dt)), float(cum), float(shares)
-            ))
+        if not ticker:
+            continue
+        d = date.fromisoformat(str(dt))
+        bucket = agg[(ticker, fund_id, share_class)][d]
+        bucket[0] += float(cum or 0)
+        bucket[1] += float(shares or 0)
+    class_cumulative = {
+        key: [(d, c, s) for d, (c, s) in date_map.items()]
+        for key, date_map in agg.items()
+    }
 
     # Compute monthly deltas per share class, then sum across classes per fund
     monthly_sales = defaultdict(dict)
-    for (ticker, fund_id, share_class, offering_type), data_points in class_cumulative.items():
+    for (ticker, fund_id, share_class), data_points in class_cumulative.items():
         data_points.sort()
         nav_lookup = nav_by_class.get((fund_id, share_class), {})
         class_sales = _compute_class_monthly_deltas(data_points, nav_lookup)
