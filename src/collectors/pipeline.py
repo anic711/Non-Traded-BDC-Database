@@ -392,9 +392,10 @@ async def _store_parsed_data(fund_id: int, filing_id: int, parsed: ParsedFiling)
                 )
                 so = so_row.scalar()
                 if so:
-                    rec.shares_tendered = (
-                        rec.pct_tendered_of_os / Decimal("100") * Decimal(str(so))
-                    ).quantize(Decimal("1"))
+                    rec.shares_tendered = int(
+                        (rec.pct_tendered_of_os / Decimal("100") * Decimal(str(so)))
+                        .quantize(Decimal("1"))
+                    )
 
         # Redemption records — 8-K data is preliminary and should not
         # overwrite authoritative SC TO-I/A data
@@ -420,10 +421,12 @@ async def _store_parsed_data(fund_id: int, filing_id: int, parsed: ParsedFiling)
                     if existing_row[3] is None and rec.value_redeemed is not None:
                         updates["value_redeemed"] = rec.value_redeemed
                     if updates:
-                        set_clauses = ", ".join(f"{k} = :{k}" for k in updates)
+                        # Convert Decimal values to float for raw SQL binding
+                        safe_updates = {k: float(v) if isinstance(v, Decimal) else v for k, v in updates.items()}
+                        set_clauses = ", ".join(f"{k} = :{k}" for k in safe_updates)
                         await session.execute(
                             text(f"UPDATE redemptions SET {set_clauses} WHERE fund_id = :fid AND as_of_date = :dt"),
-                            {"fid": fund_id, "dt": str(rec.as_of_date), **updates},
+                            {"fid": fund_id, "dt": str(rec.as_of_date), **safe_updates},
                         )
                     continue
 
