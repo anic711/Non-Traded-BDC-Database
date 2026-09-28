@@ -36,8 +36,11 @@ def _compute_class_monthly_deltas(data_points, nav_lookup):
         # Allow negative deltas through — at the fund level they offset matching
         # positives in sibling buckets (e.g., share class consolidation, late
         # restatements). Dropping them would silently overstate gross sales.
+        # Use the share-count method if EITHER endpoint is rounded. When a fund
+        # switches from $100M-rounded to precise reporting (HLEND, Jul 2026),
+        # precise-minus-rounded is just rounding noise and can go negative.
         sale_amount = None
-        if _is_rounded(cum) and _is_rounded(cum_prev):
+        if _is_rounded(cum) or _is_rounded(cum_prev):
             delta_shares = shares - shares_prev
             prior_nav = _closest_value(nav_lookup, d_prev)
             if prior_nav:
