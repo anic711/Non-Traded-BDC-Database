@@ -221,6 +221,23 @@ async def _process_filing(
                     f"in 8-K exhibits for {fund.ticker}"
                 )
 
+    # SC TO-I/A amendments often attach a shareholder letter with preliminary
+    # results as an exhibit (e.g., BCRED's Q3 2026 letter, ex99a1vii). Only
+    # amendments: the original SC TO-I exhibits are offer documents whose
+    # "up to X% of shares" language would read as requests.
+    if filing_info.form_type == "SC TO-I/A":
+        exhibit_redemptions = await _fetch_and_parse_8k_exhibits(
+            client, fund.cik, filing_info,
+        )
+        if exhibit_redemptions:
+            if parsed is None:
+                parsed = ParsedFiling()
+            parsed.redemption_records.extend(exhibit_redemptions)
+            logger.info(
+                f"Found {len(exhibit_redemptions)} redemption records "
+                f"in SC TO-I/A exhibits for {fund.ticker}"
+            )
+
     # Store parsed data
     if parsed and parsed.has_data:
         await _store_parsed_data(fund.id, filing_id, parsed)
@@ -558,40 +575,47 @@ async def backfill_8k_exhibit_redemptions():
 
     Scans all 8-K filings in the database, checks if their primary document
     references Exhibit 99.x, fetches and parses those exhibits, and stores
-    any new redemption data found.
+    any new redemption data found. Also re-checks exhibits of SC TO-I/A
+    amendments from the last 180 days (shareholder letters).
     """
     client = EdgarClient()
     try:
         async with async_session_factory() as session:
             result = await session.execute(text("""
                 SELECT fi.id, fi.fund_id, fi.accession_number, fi.filing_date,
-                       fi.raw_html, f.cik, f.ticker
+                       fi.raw_html, f.cik, f.ticker, fi.form_type
                 FROM filings fi
                 JOIN funds f ON fi.fund_id = f.id
-                WHERE fi.form_type = '8-K' AND fi.raw_html IS NOT NULL
+                WHERE fi.raw_html IS NOT NULL
+                  AND (fi.form_type = '8-K'
+                       OR (fi.form_type = 'SC TO-I/A'
+                           AND fi.filing_date >= DATE('now', '-180 days')))
                 ORDER BY fi.filing_date
             """))
             filings = result.fetchall()
 
         found = 0
         for row in filings:
-            filing_id, fund_id, accession, filing_date_str, raw_html, cik, ticker = row
+            filing_id, fund_id, accession, filing_date_str, raw_html, cik, ticker, form_type = row
             filing_date = date.fromisoformat(str(filing_date_str))
+            is_amendment = form_type == "SC TO-I/A"
 
             records = []
 
-            # Check primary document for tender data
-            try:
-                primary_records = parse_8k_exhibit_for_redemptions(raw_html, filing_date)
-                records.extend(primary_records)
-            except Exception as e:
-                logger.warning(f"Backfill primary parse error for {ticker} {accession}: {e}")
+            # Check primary document for tender data (8-Ks only; an SC TO-I/A
+            # primary document is handled by the SC TO-I parser)
+            if not is_amendment:
+                try:
+                    primary_records = parse_8k_exhibit_for_redemptions(raw_html, filing_date)
+                    records.extend(primary_records)
+                except Exception as e:
+                    logger.warning(f"Backfill primary parse error for {ticker} {accession}: {e}")
 
             # Check exhibits if primary doc references them
-            if has_tender_exhibit_references(raw_html):
+            if is_amendment or has_tender_exhibit_references(raw_html):
                 filing_info = FilingInfo(
                     accession_number=accession,
-                    form_type="8-K",
+                    form_type=form_type,
                     filing_date=filing_date,
                     primary_document="",
                 )

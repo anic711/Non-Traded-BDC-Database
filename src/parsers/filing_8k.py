@@ -13,7 +13,7 @@ Common table structures:
 import re
 import logging
 import calendar
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import warnings
@@ -479,15 +479,46 @@ def parse_8k_exhibit_for_redemptions(
     value_redeemed = None
     pct_tendered = None
 
+    # --- Shares tendered (percentage) ---
+    # Found first so the quarter can be read from the same passage
+    # (letters often mention several quarters, e.g. "In Q2 ... requests in Q3 were").
+    # "repurchase requests of/totaling X% of shares outstanding"
+    # "requests to repurchase approximately X% of outstanding shares"
+    pct_patterns = [
+        r"(?:repurchase\s+request|tender(?:ed)?|redemption\s+request)s?\s+(?:of\s+|to\s+repurchase\s+|are\s+|were\s+)?(?:(?:an\s+)?estimated\s+)?(?:total(?:ing)?\s+)?(?:of\s+)?"
+        r"(?:approximately\s+)?([\d.]+)%\s*\d?\s+of\s+(?:aggregate\s+)?(?:outstanding\s+)?shares",
+        # "requests to repurchase approximately X% of outstanding shares"
+        r"requests?\s+to\s+repurchase\s+(?:approximately\s+)?([\d.]+)%\s*\d?\s+of\s+(?:aggregate\s+)?(?:outstanding\s+)?(?:shares|Shares)",
+        # "repurchase requests in Q3 were an estimated $4.3 billion, representing approximately 10% of shares outstanding"
+        # (not "will fulfill repurchase requests representing 5%", the cap)
+        r"(?<!fulfill\s)(?<!honor\s)repurchase\s+requests\s+(?:[^.%]|\.\d){0,120}?representing\s+(?:approximately\s+)?([\d.]+)%\s*\d?\s+of\s+(?:aggregate\s+)?(?:outstanding\s+)?shares",
+        # "or X% of its outstanding ... shares ... were validly tendered"
+        r"(?:or\s+)?(?:approximately\s+)?([\d.]+)%\s+of\s+(?:its\s+)?(?:aggregate\s+)?outstanding\s+(?:common\s+)?[Ss]hares.*?were\s+(?:validly\s+)?tendered",
+    ]
+    pct_match = None
+    for pattern in pct_patterns:
+        m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        if m:
+            try:
+                pct_tendered = Decimal(m.group(1))
+                pct_match = m
+            except Exception:
+                pass
+            break
+
     # --- Determine the quarter-end as_of_date ---
     as_of = None
+    # Strategy 0: quarter named in or just before the repurchase-request figure,
+    # e.g. "During the third quarter, HLEND received repurchase requests..."
+    if pct_match:
+        as_of = _quarter_before(text, pct_match.start(), pct_match.end(), filing_date)
     # Strategy 1: "In the first/second/third/fourth quarter of YYYY" near
     # tender/repurchase context — most reliable for shareholder letters
     q_ref = re.search(
         r"(?:in|for|during)\s+the\s+(first|second|third|fourth|1st|2nd|3rd|4th)\s+quarter\s+of\s+(\d{4})",
         text, re.IGNORECASE,
     )
-    if q_ref:
+    if q_ref and not as_of:
         q_name = q_ref.group(1).lower()
         year = int(q_ref.group(2))
         q_map = {"first": 3, "1st": 3, "second": 6, "2nd": 6,
@@ -540,26 +571,6 @@ def parse_8k_exhibit_for_redemptions(
                 shares_tendered = val
                 break
 
-    # --- Shares tendered (percentage) ---
-    # "repurchase requests of/totaling X% of shares outstanding"
-    # "requests to repurchase approximately X% of outstanding shares"
-    pct_patterns = [
-        r"(?:repurchase\s+request|tender(?:ed)?|redemption\s+request)s?\s+(?:of\s+|to\s+repurchase\s+)?(?:(?:an\s+)?estimated\s+)?(?:total(?:ing)?\s+)?(?:of\s+)?"
-        r"(?:approximately\s+)?([\d.]+)%\s*\d?\s+of\s+(?:aggregate\s+)?(?:outstanding\s+)?shares",
-        # "requests to repurchase approximately X% of outstanding shares"
-        r"requests?\s+to\s+repurchase\s+(?:approximately\s+)?([\d.]+)%\s*\d?\s+of\s+(?:aggregate\s+)?(?:outstanding\s+)?(?:shares|Shares)",
-        # "or X% of its outstanding ... shares ... were validly tendered"
-        r"(?:or\s+)?(?:approximately\s+)?([\d.]+)%\s+of\s+(?:its\s+)?(?:aggregate\s+)?outstanding\s+(?:common\s+)?[Ss]hares.*?were\s+(?:validly\s+)?tendered",
-    ]
-    for pattern in pct_patterns:
-        m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        if m:
-            try:
-                pct_tendered = Decimal(m.group(1))
-            except Exception:
-                pass
-            break
-
     # --- Dollar value ---
     # Look for dollar amounts near tender/repurchase/redemption context.
     # Order matters: prefer patterns tied to redemption over generic ones.
@@ -575,8 +586,10 @@ def parse_8k_exhibit_for_redemptions(
         r"total\s+of\s+\$\s*([\d,.]+)\s*(billion|million|thousand)?\s*,?\s*representing",
         # "(approx. $X million)" or "(approx . $X million)" — note space-before-period
         r"\(?approx\s*\.?\s*\$\s*([\d,.]+)\s*(billion|million|thousand)?\s*\)?",
-        # "honor/fulfill ... for 5% ... approximately $X million"
-        r"(?:honor|fulfill)\s+.{0,200}?(?:approximately\s+)?\$\s*([\d,.]+)\s*(billion|million|thousand)?",
+        # "will honor/fulfill/repurchase ... 5% ... approximately $X million", within
+        # one sentence — so "In Q2, BCRED fulfilled half of the $4.5 billion" (a
+        # prior quarter's requests) is not mistaken for this quarter's repurchases
+        r"(?:honor|fulfill|will\s+repurchase)\b\s+(?:[^.]|\.\d){0,200}?(?:approximately\s+)?\$\s*([\d,.]+)\s*(billion|million|thousand)?",
     ]
     for pattern in value_patterns:
         m = re.search(pattern, text, re.IGNORECASE)
@@ -628,6 +641,43 @@ def parse_8k_exhibit_for_redemptions(
         source_form_type="8-K",
         pct_tendered_of_os=pct_tendered,
     )]
+
+
+_QUARTER_WORDS = {"first": 1, "1st": 1, "second": 2, "2nd": 2,
+                  "third": 3, "3rd": 3, "fourth": 4, "4th": 4}
+
+
+def _quarter_before(text: str, start: int, end: int, filing_date: date) -> date | None:
+    """Find the last quarter reference from ~300 chars before `start` up to `end`
+    (the matched figure itself may name it: "requests in Q3 were ...").
+
+    Matches "third quarter (of 2026)", "third-quarter 2026" and "Q3 ('26)".
+    When no year is given, uses the filing's year — stepping back a year if
+    that would put the quarter-end well after the filing (a Q4 letter filed
+    in January).
+    """
+    window = text[max(0, start - 300):end]
+    pattern = re.compile(
+        r"\b(first|second|third|fourth|1st|2nd|3rd|4th)[\s-]+quarter(?:\s+(?:of\s+)?(\d{4}))?"
+        r"|\bQ([1-4])(?:\s*(?:['’]|20)?(\d{2}))?\b",
+        re.IGNORECASE,
+    )
+    matches = list(pattern.finditer(window))
+    if not matches:
+        return None
+    m = matches[-1]
+    if m.group(1):
+        q = _QUARTER_WORDS[m.group(1).lower()]
+        year = int(m.group(2)) if m.group(2) else None
+    else:
+        q = int(m.group(3))
+        year = 2000 + int(m.group(4)) if m.group(4) else None
+    month = q * 3
+    if year is None:
+        year = filing_date.year
+        if date(year, month, 1) > filing_date + timedelta(days=100):
+            year -= 1
+    return date(year, month, calendar.monthrange(year, month)[1])
 
 
 def _snap_to_quarter_end(d: date) -> date:

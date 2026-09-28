@@ -24,7 +24,10 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.collectors.pipeline import run_update, _ensure_funds_seeded, _process_fund
+from src.collectors.pipeline import (
+    run_update, _ensure_funds_seeded, _process_fund,
+    backfill_8k_exhibit_redemptions, backfill_redemption_values,
+)
 from src.database import async_session_factory
 from src.edgar.client import EdgarClient
 from src.models import Fund
@@ -82,6 +85,13 @@ async def main():
                 logger.error(f"Error processing {fund.ticker}: {e}")
     finally:
         await client.close()
+
+    # Filings are processed newest-first, so a shareholder letter reporting
+    # requests as "% of shares outstanding" is stored before the 10-Q that
+    # supplies the share count. Re-run the backfills (as run_update does) so
+    # those percentages are converted once share counts exist.
+    await backfill_8k_exhibit_redemptions()
+    await backfill_redemption_values()
 
     logger.info(f"\nDone! Total filings processed: {total}")
 
