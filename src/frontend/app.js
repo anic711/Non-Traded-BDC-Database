@@ -72,6 +72,9 @@ function init() {
     // Export button
     document.getElementById('export-btn').addEventListener('click', exportXlsx);
 
+    // Email update button (see email.js)
+    document.getElementById('email-btn').addEventListener('click', openEmailUpdate);
+
     // Check update status on load
     checkUpdateStatus();
 
