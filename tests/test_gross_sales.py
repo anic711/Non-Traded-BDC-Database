@@ -105,3 +105,20 @@ def test_positive_only_path_unchanged():
     ]
     # $30M + $15M = $45M
     assert _aggregate_and_compute(rows)[date(2026, 5, 1)] == 45_000_000
+
+
+def test_hlend_jul_2026_switch_from_rounded_to_precise():
+    """HLEND reported consideration rounded to $100M through Jun 2026, then
+    switched to precise figures in Jul 2026. Precise-minus-rounded deltas
+    are rounding noise (Class F: $5,975.1M - $6,000M = -$24.9M) and summed
+    to -$16M of "gross sales". With either endpoint rounded, sales must come
+    from share-count change x prior NAV instead.
+    """
+    nav = {date(2026, 6, 1): 25.0}
+    points = [
+        (date(2026, 6, 1), 6_000_000_000, 238_220_775),
+        (date(2026, 7, 1), 5_975_100_000, 238_825_192),
+    ]
+    sales = _compute_class_monthly_deltas(points, nav)
+    assert sales[date(2026, 7, 1)] == (238_825_192 - 238_220_775) * 25.0
+    assert sales[date(2026, 7, 1)] > 0
